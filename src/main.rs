@@ -52,6 +52,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Setup Socket.IO handlers
     socketio::setup_socketio_handlers(io.clone(), state.clone());
 
+    // Spawn a task to broadcast events to Socket.IO clients
+    let mut event_rx = event_tx.subscribe();
+    let io_clone = io.clone();
+    tokio::spawn(async move {
+        while let Ok(event) = event_rx.recv().await {
+            if let Some(ns) = io_clone.of("/") {
+                // Emit to all connected Socket.IO clients
+                let _ = ns.emit(event.event_type.as_str(), &event.data).await;
+            }
+        }
+    });
+
     // Create app state with Socket.IO instance
     let app_state_with_io = (state.clone(), io);
 

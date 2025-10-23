@@ -18,6 +18,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "optimize_performance",
         sql: include_str!("../migrations/002_optimize_performance.sql"),
     },
+    Migration {
+        version: 3,
+        name: "add_subscriptions_table",
+        sql: include_str!("../migrations/003_add_subscriptions_table.sql"),
+    },
 ];
 
 pub async fn init_database(db_file: &str) -> Result<SqlitePool, Box<dyn std::error::Error>> {

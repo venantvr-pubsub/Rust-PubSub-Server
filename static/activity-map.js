@@ -126,9 +126,39 @@ document.addEventListener("DOMContentLoaded", () => {
 
     svg.appendChild(defs);
 
+    /**
+     * Initialize activity map with existing graph state
+     */
+    async function initializeActivityMap() {
+        try {
+            const response = await fetch('/graph/state');
+            const state = await response.json();
+
+            console.log('Initial graph state:', state);
+
+            // Draw all existing producers, topics, and consumers
+            state.producers.forEach(producer => {
+                drawNode(producer, 'producer', producersCol);
+            });
+
+            state.topics.forEach(topic => {
+                drawNode(topic, 'topic', topicsCol);
+            });
+
+            state.consumers.forEach(consumer => {
+                drawNode(consumer, 'consumer', consumersCol);
+            });
+
+            console.log('Activity map initialized with existing data');
+        } catch (error) {
+            console.error('Failed to initialize activity map:', error);
+        }
+    }
 
     socket.on('connect', () => {
         console.log('Connected to activity stream.');
+        // Load initial state when connected
+        initializeActivityMap();
     });
 
     socket.on('new_message', (data) => {
