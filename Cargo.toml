@@ -3,6 +3,11 @@ name = "pubsub_server"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["parallel-emit"]
+parallel-emit = []
+sequential-emit = []
+
 [dependencies]
 axum = { version = "0.8.6", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
@@ -16,6 +21,7 @@ uuid = { version = "1.0", features = ["v4", "fast-rng"] }
 futures-util = "0.3"
 rust-embed = { version = "8.5", features = ["include-exclude"] }
 mime_guess = "2.0"
+socketioxide = "0.17.2"
 
 [profile.release]
 opt-level = 3

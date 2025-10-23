@@ -1,32 +1,34 @@
 -- Create new messages table with new columns
 DROP TABLE IF EXISTS messages;
 
-CREATE TABLE messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    topic TEXT,
+CREATE TABLE messages
+(
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic      TEXT,
     message_id TEXT,
-    message TEXT,
-    producer TEXT,
-    timestamp REAL
+    message    TEXT,
+    producer   TEXT,
+    timestamp  REAL
 );
 
 -- Create new consumptions table with message_id
 DROP TABLE IF EXISTS consumptions;
 
-CREATE TABLE consumptions (
-    consumer TEXT,
-    topic TEXT,
+CREATE TABLE consumptions
+(
+    consumer   TEXT,
+    topic      TEXT,
     message_id TEXT,
-    message TEXT,
-    timestamp REAL
+    message    TEXT,
+    timestamp  REAL
 );
 
 -- Subscriptions table remains unchanged
 CREATE TABLE IF NOT EXISTS subscriptions (
-    sid TEXT,
-    consumer TEXT,
-    topic TEXT,
-    connected_at REAL,
+    sid             TEXT,
+    consumer        TEXT,
+    topic           TEXT,
+    connected_at    REAL,
     PRIMARY KEY (sid, topic)
  );
 
@@ -38,10 +40,11 @@ CREATE INDEX idx_messages_message_id ON messages (message_id);
 CREATE TRIGGER IF NOT EXISTS trim_messages
 AFTER INSERT ON messages
 BEGIN
-DELETE FROM messages
-WHERE rowid NOT IN (
-    SELECT rowid FROM messages
-    ORDER BY timestamp DESC
+DELETE
+FROM messages
+WHERE rowid NOT IN (SELECT rowid
+                    FROM messages
+                    ORDER BY timestamp DESC
     LIMIT 1000
     );
 END;
@@ -50,10 +53,11 @@ END;
 CREATE TRIGGER IF NOT EXISTS trim_consumptions
 AFTER INSERT ON consumptions
 BEGIN
-DELETE FROM consumptions
-WHERE rowid NOT IN (
-    SELECT rowid FROM consumptions
-    ORDER BY timestamp DESC
+DELETE
+FROM consumptions
+WHERE rowid NOT IN (SELECT rowid
+                    FROM consumptions
+                    ORDER BY timestamp DESC
     LIMIT 1000
     );
 END;
@@ -62,10 +66,11 @@ END;
 CREATE TRIGGER IF NOT EXISTS trim_subscriptions
 AFTER INSERT ON subscriptions
 BEGIN
-DELETE FROM subscriptions
-WHERE rowid NOT IN (
-    SELECT rowid FROM subscriptions
-    ORDER BY connected_at DESC
+DELETE
+FROM subscriptions
+WHERE rowid NOT IN (SELECT rowid
+                    FROM subscriptions
+                    ORDER BY connected_at DESC
     LIMIT 1000
     );
 END;

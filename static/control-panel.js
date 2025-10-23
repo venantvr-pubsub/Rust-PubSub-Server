@@ -74,29 +74,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         socket.on("message", (data) => {
             console.log(`Message received: ${JSON.stringify(data)}`);
-
-            // --- CORRECTION : Définir la variable 'list' en récupérant l'élément du DOM ---
-            const list = document.getElementById("receivedMessagesList");
-            // --- FIN DE LA CORRECTION ---
-
-            const item = document.createElement("li");
-            item.className = "list-group-item";
-            item.innerHTML = `<strong>[${data.topic}]</strong> <em>(${data.producer} / ${data.message_id})</em>: ${JSON.stringify(data.message)}`;
-            list.prepend(item);
-
-            // --- ADDITION: Limit size of received messages list ---
-            while (list.children.length > MAX_LIST_SIZE) {
-                list.removeChild(list.lastChild);
-            }
-            // --- FIN DE L'AJOUT ---
-
-            // Don't emit consumed here - let the handler do it
-            // socket.emit("consumed", {
-            //     topic: data.topic,
-            //     message_id: data.message_id,
-            //     message: data.message,
-            //     consumer: consumer
-            // });
+            // Message received - no UI display needed (removed Received Messages tab)
         });
 
         socket.on("disconnect", () => console.log("Disconnected from server."));

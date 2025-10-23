@@ -10,7 +10,10 @@ use tokio::sync::{mpsc, RwLock};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+pub async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State((state, _)): State<(crate::app_state::AppState, socketioxide::SocketIo)>,
+) -> Response {
     ws.on_upgrade(|socket| handle_socket(socket, state))
 }
 

@@ -5,6 +5,7 @@ mod database;
 mod embedded;
 mod handlers;
 mod models;
+mod socketio;
 mod websocket;
 
 use app_state::AppState;
@@ -19,6 +20,7 @@ use handlers::{
     clients_handler, consumptions_handler, graph_state_handler, health_check, messages_handler,
     publish_handler,
 };
+use socketioxide::SocketIo;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
@@ -44,6 +46,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = AppState::new(broker);
 
+    // Create Socket.IO layer
+    let (io_layer, io) = SocketIo::new_layer();
+
+    // Setup Socket.IO handlers
+    socketio::setup_socketio_handlers(io.clone(), state.clone());
+
+    // Create app state with Socket.IO instance
+    let app_state_with_io = (state.clone(), io);
+
     let app = Router::new()
         .route("/publish", post(publish_handler))
         .route("/clients", get(clients_handler))
@@ -52,8 +63,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/graph/state", get(graph_state_handler))
         .route("/health", get(health_check))
         .route("/ws", get(ws_handler))
-        .with_state(state)
+        .with_state(app_state_with_io)
         .fallback(serve_embedded)
+        .layer(io_layer)
         .layer(CorsLayer::permissive());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 5000));

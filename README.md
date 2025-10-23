@@ -55,6 +55,32 @@ cargo build --release
 ./target/release/pubsub_server
 ```
 
+### Using Make (Recommended for Development)
+
+```bash
+# Show available commands
+make help
+
+# Build and run in release mode
+make dev
+
+# Build and run in debug mode
+make run
+
+# Stop the server
+make stop
+
+# Kill any process using port 5000 (fixes "Address already in use" error)
+make kill-port
+
+# Clean restart
+make fresh
+make dev
+
+# Run Python Socket.IO demo client
+make demo
+```
+
 ## Configuration
 
 ### Environment Variables
@@ -127,6 +153,11 @@ const PURGE_INTERVAL_MINUTES: u64 = 30;
 
 - `GET /ws` - WebSocket endpoint for real-time subscriptions
 
+### Socket.IO
+
+- Socket.IO endpoint at root (`/`) for easy client integration
+- Supports Python, JavaScript, and other Socket.IO clients
+
 ### Web Interface
 
 - `http://localhost:5000/control-panel.html` - Main control panel
@@ -146,6 +177,60 @@ curl -X POST http://localhost:5000/publish \
     "message": {"text": "Hello World"},
     "producer": "my-producer"
   }'
+```
+
+### Socket.IO Client (Python)
+
+```python
+import socketio
+import json
+
+sio = socketio.Client()
+
+
+@sio.event
+def connect():
+    print("Connected!")
+    # Subscribe to topics
+    sio.emit('subscribe', {
+        'consumer': 'my-consumer',
+        'topics': ['events']
+    })
+
+
+@sio.event
+def message(data):
+    # Parse message
+    if isinstance(data, str):
+        msg = json.loads(data)
+    else:
+        msg = data
+
+    print(f"Received: {msg}")
+
+    # Send consumption acknowledgment (required for control panel tracking)
+    sio.emit('consumed', {
+        'consumer': 'my-consumer',
+        'topic': msg['topic'],
+        'message_id': msg['message_id'],
+        'message': msg['message']
+    })
+
+
+sio.connect('http://localhost:5000')
+sio.wait()
+```
+
+**Install dependencies:**
+
+```bash
+pip3 install --break-system-packages python-socketio
+```
+
+**Run the included demo:**
+
+```bash
+make demo
 ```
 
 ### Health Check

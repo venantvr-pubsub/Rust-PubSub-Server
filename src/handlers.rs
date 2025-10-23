@@ -3,6 +3,7 @@ use crate::models::{
     ClientInfo, ConsumptionInfo, GraphState, HealthStatus, MessageInfo, PublishRequest,
 };
 use axum::{extract::State, http::StatusCode, Json};
+use socketioxide::SocketIo;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::RwLock;
@@ -41,7 +42,7 @@ where
 }
 
 pub async fn publish_handler(
-    State(state): State<AppState>,
+    State((state, io)): State<(AppState, SocketIo)>,
     Json(payload): Json<PublishRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     if payload.topic.is_empty() || payload.message_id.is_empty() || payload.producer.is_empty() {
@@ -63,20 +64,43 @@ pub async fn publish_handler(
         )
         .await;
 
-    let channels = state.topic_channels.read().await;
-    if let Some(tx) = channels.get(&payload.topic) {
-        let msg = serde_json::to_string(&payload).unwrap_or_default();
-        let _ = tx.send(msg);
+    // Emit to Socket.IO rooms
+    #[cfg(feature = "parallel-emit")]
+    {
+        // Parallel emit: both rooms simultaneously for lower latency
+        if let (Some(ns1), Some(ns2)) = (io.of("/"), io.of("/")) {
+            let topic_emit = ns1.to(payload.topic.clone()).emit("message", &payload);
+            let wildcard_emit = ns2.to("__all__").emit("message", &payload);
+
+            // Execute both emits concurrently
+            let _ = tokio::join!(topic_emit, wildcard_emit);
+        }
+    }
+
+    #[cfg(feature = "sequential-emit")]
+    {
+        // Sequential emit: one after another (original behavior)
+        if let Some(ns) = io.of("/") {
+            let _ = ns.to(payload.topic.clone()).emit("message", &payload).await;
+        }
+
+        if let Some(ns) = io.of("/") {
+            let _ = ns.to("__all__").emit("message", &payload).await;
+        }
     }
 
     Ok(Json(serde_json::json!({"status": "ok"})))
 }
 
-pub async fn clients_handler(State(state): State<AppState>) -> Json<Vec<ClientInfo>> {
+pub async fn clients_handler(
+    State((state, _)): State<(AppState, SocketIo)>,
+) -> Json<Vec<ClientInfo>> {
     Json(state.broker.get_clients().await)
 }
 
-pub async fn messages_handler(State(state): State<AppState>) -> Json<Vec<MessageInfo>> {
+pub async fn messages_handler(
+    State((state, _)): State<(AppState, SocketIo)>,
+) -> Json<Vec<MessageInfo>> {
     let messages = get_or_fetch_cached(&state.cache.messages, state.cache.ttl, || async {
         state.broker.get_messages().await
     })
@@ -84,7 +108,9 @@ pub async fn messages_handler(State(state): State<AppState>) -> Json<Vec<Message
     Json(messages)
 }
 
-pub async fn consumptions_handler(State(state): State<AppState>) -> Json<Vec<ConsumptionInfo>> {
+pub async fn consumptions_handler(
+    State((state, _)): State<(AppState, SocketIo)>,
+) -> Json<Vec<ConsumptionInfo>> {
     let consumptions = get_or_fetch_cached(&state.cache.consumptions, state.cache.ttl, || async {
         state.broker.get_consumptions().await
     })
@@ -92,7 +118,9 @@ pub async fn consumptions_handler(State(state): State<AppState>) -> Json<Vec<Con
     Json(consumptions)
 }
 
-pub async fn graph_state_handler(State(state): State<AppState>) -> Json<GraphState> {
+pub async fn graph_state_handler(
+    State((state, _)): State<(AppState, SocketIo)>,
+) -> Json<GraphState> {
     let graph = get_or_fetch_cached(&state.cache.graph_state, state.cache.ttl, || async {
         state.broker.get_graph_state().await
     })
@@ -100,7 +128,9 @@ pub async fn graph_state_handler(State(state): State<AppState>) -> Json<GraphSta
     Json(graph)
 }
 
-pub async fn health_check(State(state): State<AppState>) -> Result<Json<HealthStatus>, StatusCode> {
+pub async fn health_check(
+    State((state, _)): State<(AppState, SocketIo)>,
+) -> Result<Json<HealthStatus>, StatusCode> {
     match state.broker.db().acquire().await {
         Ok(_) => Ok(Json(HealthStatus {
             status: "healthy".to_string(),
