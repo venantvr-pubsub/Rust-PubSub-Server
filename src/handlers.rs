@@ -4,7 +4,7 @@ use crate::models::{
 };
 use axum::{extract::State, http::StatusCode, Json};
 use socketioxide::SocketIo;
-use std::sync::Arc;
+use std::sync::{Arc, atomic::Ordering};
 use std::time::SystemTime;
 use tokio::sync::RwLock;
 use tracing::info;
@@ -13,12 +13,18 @@ async fn get_or_fetch_cached<T, F, Fut>(
     cache: &Arc<RwLock<Option<(T, std::time::Instant)>>>,
     ttl: std::time::Duration,
     fetch_fn: F,
+    dashboard_enabled: bool,
 ) -> T
 where
     T: Clone,
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = T>,
 {
+    // If dashboard is disabled, always fetch fresh data without caching
+    if !dashboard_enabled {
+        return fetch_fn().await;
+    }
+
     // Check cache
     {
         let cache_read = cache.read().await;
@@ -64,28 +70,31 @@ pub async fn publish_handler(
         )
         .await;
 
-    // Emit to Socket.IO rooms
-    #[cfg(feature = "parallel-emit")]
-    {
-        // Parallel emit: both rooms simultaneously for lower latency
-        if let (Some(ns1), Some(ns2)) = (io.of("/"), io.of("/")) {
-            let topic_emit = ns1.to(payload.topic.clone()).emit("message", &payload);
-            let wildcard_emit = ns2.to("__all__").emit("message", &payload);
+    // Only emit to Socket.IO if dashboard is enabled
+    if state.dashboard_enabled.load(Ordering::Relaxed) {
+        // Emit to Socket.IO rooms
+        #[cfg(feature = "parallel-emit")]
+        {
+            // Parallel emit: both rooms simultaneously for lower latency
+            if let (Some(ns1), Some(ns2)) = (io.of("/"), io.of("/")) {
+                let topic_emit = ns1.to(payload.topic.clone()).emit("message", &payload);
+                let wildcard_emit = ns2.to("__all__").emit("message", &payload);
 
-            // Execute both emits concurrently
-            let _ = tokio::join!(topic_emit, wildcard_emit);
-        }
-    }
-
-    #[cfg(feature = "sequential-emit")]
-    {
-        // Sequential emit: one after another (original behavior)
-        if let Some(ns) = io.of("/") {
-            let _ = ns.to(payload.topic.clone()).emit("message", &payload).await;
+                // Execute both emits concurrently
+                let _ = tokio::join!(topic_emit, wildcard_emit);
+            }
         }
 
-        if let Some(ns) = io.of("/") {
-            let _ = ns.to("__all__").emit("message", &payload).await;
+        #[cfg(feature = "sequential-emit")]
+        {
+            // Sequential emit: one after another (original behavior)
+            if let Some(ns) = io.of("/") {
+                let _ = ns.to(payload.topic.clone()).emit("message", &payload).await;
+            }
+
+            if let Some(ns) = io.of("/") {
+                let _ = ns.to("__all__").emit("message", &payload).await;
+            }
         }
     }
 
@@ -101,9 +110,13 @@ pub async fn clients_handler(
 pub async fn messages_handler(
     State((state, _)): State<(AppState, SocketIo)>,
 ) -> Json<Vec<MessageInfo>> {
-    let messages = get_or_fetch_cached(&state.cache.messages, state.cache.ttl, || async {
-        state.broker.get_messages().await
-    })
+    let dashboard_enabled = state.dashboard_enabled.load(Ordering::Relaxed);
+    let messages = get_or_fetch_cached(
+        &state.cache.messages,
+        state.cache.ttl,
+        || async { state.broker.get_messages().await },
+        dashboard_enabled,
+    )
     .await;
     Json(messages)
 }
@@ -111,9 +124,13 @@ pub async fn messages_handler(
 pub async fn consumptions_handler(
     State((state, _)): State<(AppState, SocketIo)>,
 ) -> Json<Vec<ConsumptionInfo>> {
-    let consumptions = get_or_fetch_cached(&state.cache.consumptions, state.cache.ttl, || async {
-        state.broker.get_consumptions().await
-    })
+    let dashboard_enabled = state.dashboard_enabled.load(Ordering::Relaxed);
+    let consumptions = get_or_fetch_cached(
+        &state.cache.consumptions,
+        state.cache.ttl,
+        || async { state.broker.get_consumptions().await },
+        dashboard_enabled,
+    )
     .await;
     Json(consumptions)
 }
@@ -121,9 +138,13 @@ pub async fn consumptions_handler(
 pub async fn graph_state_handler(
     State((state, _)): State<(AppState, SocketIo)>,
 ) -> Json<GraphState> {
-    let graph = get_or_fetch_cached(&state.cache.graph_state, state.cache.ttl, || async {
-        state.broker.get_graph_state().await
-    })
+    let dashboard_enabled = state.dashboard_enabled.load(Ordering::Relaxed);
+    let graph = get_or_fetch_cached(
+        &state.cache.graph_state,
+        state.cache.ttl,
+        || async { state.broker.get_graph_state().await },
+        dashboard_enabled,
+    )
     .await;
     Json(graph)
 }
@@ -148,4 +169,35 @@ fn current_timestamp() -> f64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs_f64()
+}
+
+pub async fn dashboard_login_handler(
+    State((state, _)): State<(AppState, SocketIo)>,
+) -> Json<serde_json::Value> {
+    state.dashboard_enabled.store(true, Ordering::Relaxed);
+    info!("Dashboard enabled");
+    Json(serde_json::json!({
+        "status": "ok",
+        "dashboard_enabled": true
+    }))
+}
+
+pub async fn dashboard_logout_handler(
+    State((state, _)): State<(AppState, SocketIo)>,
+) -> Json<serde_json::Value> {
+    state.dashboard_enabled.store(false, Ordering::Relaxed);
+    info!("Dashboard disabled");
+    Json(serde_json::json!({
+        "status": "ok",
+        "dashboard_enabled": false
+    }))
+}
+
+pub async fn dashboard_status_handler(
+    State((state, _)): State<(AppState, SocketIo)>,
+) -> Json<serde_json::Value> {
+    let enabled = state.dashboard_enabled.load(Ordering::Relaxed);
+    Json(serde_json::json!({
+        "dashboard_enabled": enabled
+    }))
 }

@@ -29,9 +29,9 @@ fn build_response(content: Cow<'static, [u8]>, path: &str) -> Response {
 pub async fn serve_embedded(uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
 
-    // Si c'est la racine, rediriger vers control-panel.html
+    // Si c'est la racine, rediriger vers login.html
     if path.is_empty() || path == "/" {
-        return axum::response::Redirect::permanent("/control-panel.html").into_response();
+        return axum::response::Redirect::permanent("/login.html").into_response();
     }
 
     // Essayer de charger depuis les fichiers HTML

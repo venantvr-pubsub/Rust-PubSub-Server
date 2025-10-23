@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Dashboard Login</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e4e4e7;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .login-container {
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+        }
+
+        .logo {
+            font-size: 48px;
+            margin-bottom: 20px;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        h1 {
+            font-size: 42px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        p {
+            font-size: 18px;
+            color: #a1a1aa;
+            margin-bottom: 48px;
+            line-height: 1.6;
+        }
+
+        #loginBtn {
+            font-size: 24px;
+            font-weight: 600;
+            padding: 24px 64px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        #loginBtn:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 15px 40px rgba(102, 126, 234, 0.6);
+        }
+
+        #loginBtn:active {
+            transform: translateY(-2px);
+        }
+
+        #loginBtn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status-message {
+            margin-top: 24px;
+            font-size: 16px;
+            color: #22c55e;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .status-message.show {
+            opacity: 1;
+        }
+
+        .features {
+            margin-top: 48px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            text-align: left;
+        }
+
+        .feature {
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .feature-icon {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+
+        .feature-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #e4e4e7;
+            margin-bottom: 4px;
+        }
+
+        .feature-desc {
+            font-size: 14px;
+            color: #a1a1aa;
+            line-height: 1.4;
+        }
+
+        @media (max-width: 600px) {
+            h1 { font-size: 32px; }
+            #loginBtn { font-size: 20px; padding: 20px 48px; }
+            .features { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">📊</div>
+        <h1>Pub/Sub Dashboard</h1>
+        <p>Visualisez en temps réel les messages, topics et consommateurs de votre système pub/sub</p>
+
+        <button id="loginBtn">Accéder au Dashboard</button>
+
+        <div class="status-message" id="statusMessage">
+            Connexion en cours...
+        </div>
+
+        <div class="features">
+            <div class="feature">
+                <div class="feature-icon">⚡</div>
+                <div class="feature-title">Temps Réel</div>
+                <div class="feature-desc">Événements Socket.IO en direct</div>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">📈</div>
+                <div class="feature-title">Performance</div>
+                <div class="feature-desc">Monitoring optimisé et efficace</div>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🎨</div>
+                <div class="feature-title">Visualisation</div>
+                <div class="feature-desc">Graphiques interactifs et cartes</div>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🔒</div>
+                <div class="feature-title">Contrôle</div>
+                <div class="feature-desc">Activez uniquement quand nécessaire</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const loginBtn = document.getElementById('loginBtn');
+        const statusMessage = document.getElementById('statusMessage');
+
+        loginBtn.addEventListener('click', async () => {
+            loginBtn.disabled = true;
+            statusMessage.classList.add('show');
+            statusMessage.textContent = 'Activation du dashboard...';
+
+            try {
+                const response = await fetch('/dashboard/login', { method: 'POST' });
+                const data = await response.json();
+
+                if (data.dashboard_enabled) {
+                    localStorage.setItem('dashboardEnabled', 'true');
+                    statusMessage.textContent = '✓ Dashboard activé !';
+
+                    // Get redirect target from URL parameter or default to control panel
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const redirectTo = urlParams.get('redirect') || '/control-panel.html';
+
+                    setTimeout(() => {
+                        window.location.href = redirectTo;
+                    }, 500);
+                } else {
+                    throw new Error('Failed to enable dashboard');
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                statusMessage.textContent = '❌ Erreur de connexion';
+                statusMessage.style.color = '#ef4444';
+                loginBtn.disabled = false;
+
+                setTimeout(() => {
+                    statusMessage.classList.remove('show');
+                }, 3000);
+            }
+        });
+
+        // If already logged in, redirect immediately
+        if (localStorage.getItem('dashboardEnabled') === 'true') {
+            const urlParams = new URLSearchParams(window.location.search);
+            const redirectTo = urlParams.get('redirect') || '/control-panel.html';
+            window.location.href = redirectTo;
+        }
+    </script>
+</body>
+</html>

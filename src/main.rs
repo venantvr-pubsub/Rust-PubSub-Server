@@ -17,7 +17,8 @@ use broker::Broker;
 use database::init_database;
 use embedded::serve_embedded;
 use handlers::{
-    clients_handler, consumptions_handler, graph_state_handler, health_check, messages_handler,
+    clients_handler, consumptions_handler, dashboard_login_handler, dashboard_logout_handler,
+    dashboard_status_handler, graph_state_handler, health_check, messages_handler,
     publish_handler,
 };
 use socketioxide::SocketIo;
@@ -55,11 +56,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn a task to broadcast events to Socket.IO clients
     let mut event_rx = event_tx.subscribe();
     let io_clone = io.clone();
+    let state_clone = state.clone();
     tokio::spawn(async move {
         while let Ok(event) = event_rx.recv().await {
-            if let Some(ns) = io_clone.of("/") {
-                // Emit to all connected Socket.IO clients
-                let _ = ns.emit(event.event_type.as_str(), &event.data).await;
+            // Only emit events if dashboard is enabled
+            if state_clone.dashboard_enabled.load(std::sync::atomic::Ordering::Relaxed) {
+                if let Some(ns) = io_clone.of("/") {
+                    // Emit to all connected Socket.IO clients
+                    let _ = ns.emit(event.event_type.as_str(), &event.data).await;
+                }
             }
         }
     });
@@ -75,6 +80,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/graph/state", get(graph_state_handler))
         .route("/health", get(health_check))
         .route("/ws", get(ws_handler))
+        .route("/dashboard/login", post(dashboard_login_handler))
+        .route("/dashboard/logout", post(dashboard_logout_handler))
+        .route("/dashboard/status", get(dashboard_status_handler))
         .with_state(app_state_with_io)
         .fallback(serve_embedded)
         .layer(io_layer)
