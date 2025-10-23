@@ -211,6 +211,7 @@
                     window.location.href = redirectTo;
                 }, 500);
             } else {
+                // noinspection ExceptionCaughtLocallyJS
                 throw new Error('Failed to enable dashboard');
             }
         } catch (error) {
@@ -228,6 +229,7 @@
     // If already logged in, redirect immediately
     if (localStorage.getItem('dashboardEnabled') === 'true') {
         const urlParams = new URLSearchParams(window.location.search);
+        // noinspection UnnecessaryLocalVariableJS
         const redirectTo = urlParams.get('redirect') || '/control-panel.html';
         window.location.href = redirectTo;
     }
