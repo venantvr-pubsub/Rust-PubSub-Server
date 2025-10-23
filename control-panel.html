@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Control Panel</title>
+    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"/>
+    <link href="/static/style.css" rel="stylesheet">
+</head>
+<body>
+
+<nav class="navbar navbar-dark fixed-top">
+    <div class="container" style="padding-left: 1.5rem; padding-right: 1.5rem;">
+        <a class="navbar-brand" href="/">Pub/Sub Monitor</a>
+        <a class="nav-link active" href="/control-panel.html">Control Panel</a>
+        <a class="nav-link" href="/activity-map.html">Activity Map</a>
+        <a class="nav-link" href="/circular-graph.html">Circular Graph</a>
+    </div>
+</nav>
+
+<div class="container" style="padding-top: 70px; padding-left: 1.5rem; padding-right: 1.5rem;">
+    <h1 class="text-center">Control Panel</h1>
+
+    <div class="row mb-3 align-items-end">
+        <div class="col-md-4">
+            <label class="form-label" for="consumer">Consumer Name</label>
+            <input class="form-control" id="consumer" type="text" value="alice"/>
+        </div>
+        <div class="col-md-5">
+            <label class="form-label" for="topics">Topics (comma-separated)</label>
+            <input class="form-control" id="topics" type="text" value="orders,inventory,shipping"/>
+        </div>
+        <div class="col-md-3">
+            <button class="btn btn-primary w-100" id="connectBtn">Connect & Subscribe</button>
+        </div>
+    </div>
+
+    <hr/>
+
+    <h2>Publish Message</h2>
+    <div class="row mb-3 align-items-end">
+        <div class="col">
+            <label class="form-label" for="pubTopic">Topic</label>
+            <input class="form-control" id="pubTopic" type="text">
+        </div>
+        <div class="col">
+            <label class="form-label" for="pubProducer">Producer Name</label>
+            <input class="form-control" id="pubProducer" type="text" value="frontend_publisher"/>
+        </div>
+        <div class="col">
+            <label class="form-label" for="pubMessage">Message</label>
+            <input class="form-control" id="pubMessage" type="text"/>
+        </div>
+        <div class="col-auto">
+            <button class="btn btn-success" id="pubBtn">Publish</button>
+        </div>
+    </div>
+
+    <hr/>
+
+    <ul class="nav nav-tabs" id="pubSubTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button aria-controls="received-messages" aria-selected="true" class="nav-link active"
+                    data-bs-target="#received-messages" data-bs-toggle="tab" id="received-messages-tab" role="tab"
+                    type="button">Received Messages
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button aria-controls="clients" aria-selected="false" class="nav-link" data-bs-target="#clients"
+                    data-bs-toggle="tab" id="clients-tab" role="tab" type="button">Clients Connected
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button aria-controls="messages" aria-selected="false" class="nav-link" data-bs-target="#messages"
+                    data-bs-toggle="tab" id="messages-tab" role="tab" type="button">Published Messages
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button aria-controls="consumptions" aria-selected="false" class="nav-link"
+                    data-bs-target="#consumptions" data-bs-toggle="tab" id="consumptions-tab" role="tab"
+                    type="button">Consumptions
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content pt-3" id="pubSubTabContent">
+        <div aria-labelledby="received-messages-tab" class="tab-pane fade show active" id="received-messages"
+             role="tabpanel">
+            <ul class="list-group" id="receivedMessagesList" style="max-height: 300px; overflow-y: auto;"></ul>
+        </div>
+        <div aria-labelledby="clients-tab" class="tab-pane fade" id="clients" role="tabpanel">
+            <table class="table table-bordered table-hover" id="clientsTable">
+                <thead>
+                <tr>
+                    <th>Consumer</th>
+                    <th>Topic</th>
+                    <th>Connected At</th>
+                </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <div aria-labelledby="messages-tab" class="tab-pane fade" id="messages" role="tabpanel">
+            <table class="table table-bordered table-hover" id="messagesTable">
+                <thead>
+                <tr>
+                    <th>Producer</th>
+                    <th>Topic</th>
+                    <th>Message</th>
+                    <th>Timestamp</th>
+                </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <div aria-labelledby="consumptions-tab" class="tab-pane fade" id="consumptions" role="tabpanel">
+            <table class="table table-bordered table-hover" id="consTable">
+                <thead>
+                <tr>
+                    <th>Consumer</th>
+                    <th>Topic</th>
+                    <th>Message</th>
+                    <th>Timestamp</th>
+                </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/static/control-panel.js"></script>
+</body>
+</html>

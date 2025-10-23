@@ -1,0 +1,75 @@
+/* --- New styles for D3 graph --- */
+body {
+    overflow: hidden; /* Prevents scrolling */
+}
+
+#activity-graph-container {
+    width: 100%;
+    height: calc(100vh - 100px); /* Viewport height minus nav bar */
+    cursor: grab;
+}
+
+/* Link (arrow) styles */
+.link {
+    stroke-opacity: 0.8;
+    stroke-width: 3px;
+    fill: none; /* Important for <path> elements */
+}
+
+.link.publish {
+    stroke: #28a745; /* Green for publish */
+}
+
+.link.consume {
+    stroke: #ffab40; /* Orange for subscribe/consume */
+}
+
+.link.consumed {
+    stroke: #dc3545; /* Red for consumed */
+}
+
+/* Node (disk) styles */
+.node circle {
+    stroke: #fff;
+    stroke-width: 2px;
+}
+
+.node.producer circle {
+    fill: #007bff;
+}
+
+/* Blue for producers */
+.node.topic circle {
+    fill: #6c757d;
+}
+
+/* Gray for topics */
+.node.consumer circle {
+    fill: #dc3545;
+}
+
+/* Red for consumers */
+
+/* Node text styles */
+.node text {
+    pointer-events: none;
+    font-family: sans-serif;
+    font-size: 12px;
+    fill: #f8f9fa; /* Light text */
+    text-shadow: 0 1px 0 #343a40, 1px 0 0 #343a40, 0 -1px 0 #343a40, -1px 0 0 #343a40;
+}
+
+/* Animation for glow effect */
+@keyframes blink-effect {
+    50% {
+        fill: #ffffff; /* Makes interior blink white */
+        stroke: #ffffff; /* Adds white border */
+        stroke-width: 4px; /* Border thickness for "glow" effect */
+    }
+}
+
+/* Class to apply on node to trigger animation */
+.node.blink circle {
+    /* Duration of 500ms (half second), smooth animation */
+    animation: blink-effect 500ms ease-out;
+}

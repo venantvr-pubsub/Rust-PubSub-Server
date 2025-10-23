@@ -1,0 +1,87 @@
+/* --- Styles spécifiques à l'Activity Map --- */
+body {
+    overflow: hidden; /* Empêche le scroll */
+}
+
+#activity-map {
+    position: relative;
+    display: flex;
+    justify-content: space-between;
+    height: calc(100vh - 100px); /* Hauteur de la vue moins la barre de nav et le padding */
+}
+
+.map-column {
+    width: 30%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.node {
+    background-color: #4a505a;
+    border: 1px solid #61dafb;
+    border-radius: 8px;
+    padding: 10px 15px;
+    margin: 10px;
+    text-align: center;
+    opacity: 0; /* Commence caché */
+    animation: fadeIn 0.5s forwards;
+    min-width: 150px;
+}
+
+.placeholder-text {
+    color: #6c757d;
+    font-style: italic;
+    padding: 10px;
+    margin: 10px;
+    text-align: center;
+    opacity: 0.6;
+}
+
+#map-svg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none; /* Permet de cliquer à travers le SVG */
+}
+
+.message-arrow {
+    stroke-width: 2;
+    animation: fadeInOut 1s ease-in-out;
+}
+
+.message-arrow.publish {
+    stroke: #28a745;
+}
+
+.message-arrow.consume {
+    stroke: #ffab40;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.8);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes fadeInOut {
+    0% {
+        opacity: 0;
+    }
+    25% {
+        opacity: 1;
+    }
+    75% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0;
+    }
+}

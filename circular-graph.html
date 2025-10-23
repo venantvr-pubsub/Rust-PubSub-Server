@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Circular Graph</title>
+    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"/>
+    <link href="/static/style.css" rel="stylesheet">
+    <link href="/static/circular-graph.css" rel="stylesheet">
+</head>
+<body>
+
+<nav class="navbar navbar-dark fixed-top">
+    <div class="container" style="padding-left: 1.5rem; padding-right: 1.5rem;">
+        <a class="navbar-brand" href="/">Pub/Sub Monitor</a>
+        <a class="nav-link" href="/control-panel.html">Control Panel</a>
+        <a class="nav-link" href="/activity-map.html">Activity Map</a>
+        <a class="nav-link active" href="/circular-graph.html">Circular Graph</a>
+    </div>
+</nav>
+
+<div class="container" style="padding-top: 70px; padding-left: 1.5rem; padding-right: 1.5rem;">
+    <h1 class="text-center">Circular Graph</h1>
+    <div id="activity-graph-container">
+        <svg height="100%" id="activity-svg" width="100%">
+            <text id="loading-text" x="50%" y="50%" text-anchor="middle" fill="#6c757d" font-size="18" font-family="sans-serif">
+                En attente de données...
+            </text>
+        </svg>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/static/common-graph.js"></script>
+<script src="/static/circular-graph.js"></script>
+</body>
+</html>
