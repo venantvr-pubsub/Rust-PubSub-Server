@@ -4,7 +4,7 @@ use crate::models::{
 };
 use axum::{extract::State, http::StatusCode, Json};
 use socketioxide::SocketIo;
-use std::sync::{Arc, atomic::Ordering};
+use std::sync::{atomic::Ordering, Arc};
 use std::time::SystemTime;
 use tokio::sync::RwLock;
 use tracing::info;
@@ -70,31 +70,29 @@ pub async fn publish_handler(
         )
         .await;
 
-    // Only emit to Socket.IO if dashboard is enabled
-    if state.dashboard_enabled.load(Ordering::Relaxed) {
-        // Emit to Socket.IO rooms
-        #[cfg(feature = "parallel-emit")]
-        {
-            // Parallel emit: both rooms simultaneously for lower latency
-            if let (Some(ns1), Some(ns2)) = (io.of("/"), io.of("/")) {
-                let topic_emit = ns1.to(payload.topic.clone()).emit("message", &payload);
-                let wildcard_emit = ns2.to("__all__").emit("message", &payload);
+    // Always emit "message" events to consumers (regardless of dashboard state)
+    // This ensures consumers receive their messages even when dashboard is disabled
+    #[cfg(feature = "parallel-emit")]
+    {
+        // Parallel emit: both rooms simultaneously for lower latency
+        if let (Some(ns1), Some(ns2)) = (io.of("/"), io.of("/")) {
+            let topic_emit = ns1.to(payload.topic.clone()).emit("message", &payload);
+            let wildcard_emit = ns2.to("__all__").emit("message", &payload);
 
-                // Execute both emits concurrently
-                let _ = tokio::join!(topic_emit, wildcard_emit);
-            }
+            // Execute both emits concurrently
+            let _ = tokio::join!(topic_emit, wildcard_emit);
+        }
+    }
+
+    #[cfg(feature = "sequential-emit")]
+    {
+        // Sequential emit: one after another (original behavior)
+        if let Some(ns) = io.of("/") {
+            let _ = ns.to(payload.topic.clone()).emit("message", &payload).await;
         }
 
-        #[cfg(feature = "sequential-emit")]
-        {
-            // Sequential emit: one after another (original behavior)
-            if let Some(ns) = io.of("/") {
-                let _ = ns.to(payload.topic.clone()).emit("message", &payload).await;
-            }
-
-            if let Some(ns) = io.of("/") {
-                let _ = ns.to("__all__").emit("message", &payload).await;
-            }
+        if let Some(ns) = io.of("/") {
+            let _ = ns.to("__all__").emit("message", &payload).await;
         }
     }
 

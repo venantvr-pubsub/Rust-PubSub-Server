@@ -1,7 +1,7 @@
 // Dashboard Guard - Intercepts page access and redirects to login if not authenticated
 // This script should be included FIRST in all protected dashboard pages
 
-(function() {
+(function () {
     'use strict';
 
     // Check if dashboard is enabled
@@ -45,7 +45,7 @@
 
         logoutBtn.addEventListener('click', async () => {
             try {
-                const response = await fetch('/dashboard/logout', { method: 'POST' });
+                const response = await fetch('/dashboard/logout', {method: 'POST'});
                 const data = await response.json();
 
                 if (data.status === 'ok') {
@@ -66,7 +66,9 @@
     // Export guard status for other scripts
     window.dashboardGuard = {
         isAuthenticated: isDashboardEnabled,
-        logout: function() {
+        // La fonction qui attache l'événement au bouton est maintenant accessible ici
+        setupLogout: setupLogout,
+        logout: function () {
             const event = new Event('click');
             const btn = document.getElementById('dashboardLogoutBtn');
             if (btn) btn.dispatchEvent(event);

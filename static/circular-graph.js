@@ -5,8 +5,8 @@
 // import { createGraph } from './common-graph.js';
 
 document.addEventListener("DOMContentLoaded", () => {
-    // Helper to calculate curved arrow paths
-    function calculateCurvedPath(source, target) {
+    // Helper to calculate straight line path (not curved)
+    function calculateStraightPath(source, target) {
         const radius = 20; // Circle radius
         const dx = target.x - source.x;
         const dy = target.y - source.y;
@@ -18,11 +18,8 @@ document.addEventListener("DOMContentLoaded", () => {
         const targetX = target.x - (dx / distance) * radius;
         const targetY = target.y - (dy / distance) * radius;
 
-        const newDx = targetX - source.x;
-        const newDy = targetY - source.y;
-        const newDr = Math.sqrt(newDx * newDx + newDy * newDy);
-
-        return `M${source.x},${source.y}A${newDr},${newDr} 0 0,1 ${targetX},${targetY}`;
+        // Return straight line path (not curved)
+        return `M${source.x},${source.y}L${targetX},${targetY}`;
     }
 
     // Circular graph specific configuration
@@ -53,17 +50,78 @@ document.addEventListener("DOMContentLoaded", () => {
         },
 
         drawLink: (linkGroup, sourceNode, targetNode, type) => {
-            return linkGroup.append("path")
-                .datum({source: sourceNode, target: targetNode})
-                .attr("class", `link ${type}`)
+            // Create a group for the arrow animation
+            const arrowGroup = linkGroup.append("g")
+                .datum({source: sourceNode, target: targetNode, type: type});
+
+            // Draw the invisible base line (for path reference)
+            const baseLine = arrowGroup.append("path")
+                .attr("class", "base-line")
+                .attr("d", calculateStraightPath(sourceNode, targetNode))
+                .style("stroke", "none")
+                .style("fill", "none");
+
+            // Get the color based on type
+            const arrowColor = type === 'publish' ? '#28a745' : type === 'consume' ? '#ffab40' : '#dc3545';
+
+            // Create the animated arrow (small line with arrowhead)
+            const animatedArrow = arrowGroup.append("path")
+                .attr("class", `animated-arrow ${type}`)
                 .attr("marker-end", `url(#arrow-${type})`)
-                .attr("d", calculateCurvedPath(sourceNode, targetNode));
+                .style("stroke", arrowColor)
+                .style("stroke-width", 2)
+                .style("fill", "none");
+
+            // Calculate the path length for animation
+            const pathNode = baseLine.node();
+            const pathLength = pathNode.getTotalLength();
+
+            // Animate the arrow traveling along the path
+            const animationDuration = 800; // 800ms for arrow to travel
+            const arrowLength = 500; // Length of the visible arrow segment
+
+            function animateArrow() {
+                const startTime = Date.now();
+
+                function frame() {
+                    const elapsed = Date.now() - startTime;
+                    const progress = Math.min(elapsed / animationDuration, 1);
+
+                    // Calculate current position along the path
+                    const currentLength = pathLength * progress;
+                    const startPoint = Math.max(0, currentLength - arrowLength);
+                    const endPoint = currentLength;
+
+                    // Get points on the path
+                    const start = pathNode.getPointAtLength(startPoint);
+                    const end = pathNode.getPointAtLength(endPoint);
+
+                    // Update the animated arrow path
+                    animatedArrow.attr("d", `M${start.x},${start.y}L${end.x},${end.y}`);
+
+                    if (progress < 1) {
+                        requestAnimationFrame(frame);
+                    }
+                }
+
+                requestAnimationFrame(frame);
+            }
+
+            // Start the animation
+            animateArrow();
+
+            return arrowGroup;
         },
 
         tickHandler: (nodeGroup, linkGroup) => {
             nodeGroup.selectAll('.node').attr("transform", d => `translate(${d.x},${d.y})`);
-            // Update curved path at each tick
-            linkGroup.selectAll('path').attr("d", d => calculateCurvedPath(d.source, d.target));
+            // Update straight line paths at each tick
+            linkGroup.selectAll('g').each(function (d) {
+                const group = d3.select(this);
+                const path = calculateStraightPath(d.source, d.target);
+                group.select('.base-line').attr("d", path);
+                // Note: animated arrow updates itself during animation
+            });
         }
     };
 

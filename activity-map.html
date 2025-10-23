@@ -9,28 +9,20 @@
     <link href="/static/style.css" rel="stylesheet">
     <link href="/static/activity-map.css" rel="stylesheet">
 </head>
-<body>
+<body class="no-scroll">
 
-<nav class="navbar navbar-dark fixed-top">
-    <div class="container" style="padding-left: 1.5rem; padding-right: 1.5rem;">
-        <a class="navbar-brand" href="/">Pub/Sub Monitor</a>
-        <a class="nav-link" href="/control-panel.html">Control Panel</a>
-        <a class="nav-link active" href="/activity-map.html">Activity Map</a>
-        <a class="nav-link" href="/circular-graph.html">Circular Graph</a>
-        <button class="btn btn-sm btn-outline-danger" id="dashboardLogoutBtn" style="margin-left: auto;">Logout</button>
-    </div>
-</nav>
+<header id="main-header"></header>
 
-<div class="container" style="padding-top: 70px; padding-left: 1.5rem; padding-right: 1.5rem;">
-    <h1 class="text-center">Activity Map</h1>
-    <div id="activity-map">
+<main class="container flex-grow-1 d-flex flex-column" style="padding-top: 80px; padding-bottom: 2rem;">
+    <div id="activity-map" class="flex-grow-1">
         <div class="map-column" id="producers-col"><h2>Producers</h2></div>
         <div class="map-column" id="topics-col"><h2>Topics</h2></div>
         <div class="map-column" id="consumers-col"><h2>Consumers</h2></div>
         <svg id="map-svg"></svg>
     </div>
-</div>
+</main>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/static/nav.js"></script>
 <script src="/static/activity-map.js"></script>
 </body>
 </html>

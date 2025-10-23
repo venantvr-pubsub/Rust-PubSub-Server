@@ -10,117 +10,118 @@
 </head>
 <body>
 
-<nav class="navbar navbar-dark fixed-top">
-    <div class="container" style="padding-left: 1.5rem; padding-right: 1.5rem;">
-        <a class="navbar-brand" href="/">Pub/Sub Monitor</a>
-        <a class="nav-link active" href="/control-panel.html">Control Panel</a>
-        <a class="nav-link" href="/activity-map.html">Activity Map</a>
-        <a class="nav-link" href="/circular-graph.html">Circular Graph</a>
-        <button class="btn btn-sm btn-outline-danger" id="dashboardLogoutBtn" style="margin-left: auto;">Logout</button>
-    </div>
-</nav>
+<header id="main-header"></header>
 
-<div class="container" style="padding-top: 70px; padding-left: 1.5rem; padding-right: 1.5rem;">
-    <h1 class="text-center">Control Panel</h1>
+<main class="container" style="padding-top: 80px; padding-bottom: 2rem;">
+    <section class="card mb-4">
+        <div class="card-body">
+            <h2 class="card-title">Consumer Connection</h2>
+            <div class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label" for="consumer">Consumer Name</label>
+                    <input class="form-control" id="consumer" type="text" value="alice"/>
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label" for="topics">Topics (comma-separated)</label>
+                    <input class="form-control" id="topics" type="text" value="orders,inventory,shipping"/>
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-primary w-100" id="connectBtn">Connect & Subscribe</button>
+                </div>
+            </div>
+        </div>
+    </section>
 
-    <div class="row mb-3 align-items-end">
-        <div class="col-md-4">
-            <label class="form-label" for="consumer">Consumer Name</label>
-            <input class="form-control" id="consumer" type="text" value="alice"/>
+    <section class="card mb-4">
+        <div class="card-body">
+            <h2 class="card-title">Publish Message</h2>
+            <div class="row g-3 align-items-end">
+                <div class="col">
+                    <label class="form-label" for="pubTopic">Topic</label>
+                    <input class="form-control" id="pubTopic" type="text" placeholder="e.g., orders">
+                </div>
+                <div class="col">
+                    <label class="form-label" for="pubProducer">Producer Name</label>
+                    <input class="form-control" id="pubProducer" type="text" value="frontend_publisher"/>
+                </div>
+                <div class="col">
+                    <label class="form-label" for="pubMessage">Message</label>
+                    <input class="form-control" id="pubMessage" type="text" placeholder="Your message here"/>
+                </div>
+                <div class="col-auto">
+                    <button class="btn btn-success w-100" id="pubBtn">Publish</button>
+                </div>
+            </div>
         </div>
-        <div class="col-md-5">
-            <label class="form-label" for="topics">Topics (comma-separated)</label>
-            <input class="form-control" id="topics" type="text" value="orders,inventory,shipping"/>
-        </div>
-        <div class="col-md-3">
-            <button class="btn btn-primary w-100" id="connectBtn">Connect & Subscribe</button>
-        </div>
-    </div>
-
-    <hr/>
-
-    <h2>Publish Message</h2>
-    <div class="row mb-3 align-items-end">
-        <div class="col">
-            <label class="form-label" for="pubTopic">Topic</label>
-            <input class="form-control" id="pubTopic" type="text">
-        </div>
-        <div class="col">
-            <label class="form-label" for="pubProducer">Producer Name</label>
-            <input class="form-control" id="pubProducer" type="text" value="frontend_publisher"/>
-        </div>
-        <div class="col">
-            <label class="form-label" for="pubMessage">Message</label>
-            <input class="form-control" id="pubMessage" type="text"/>
-        </div>
-        <div class="col-auto">
-            <button class="btn btn-success" id="pubBtn">Publish</button>
-        </div>
-    </div>
-
-    <hr/>
+    </section>
 
     <ul class="nav nav-tabs" id="pubSubTabs" role="tablist">
         <li class="nav-item" role="presentation">
-            <button aria-controls="clients" aria-selected="true" class="nav-link active" data-bs-target="#clients"
-                    data-bs-toggle="tab" id="clients-tab" role="tab" type="button">Clients Connected
+            <button class="nav-link active" id="clients-tab" data-bs-toggle="tab" data-bs-target="#clients" type="button" role="tab" aria-controls="clients"
+                    aria-selected="true">Clients Connected
             </button>
         </li>
         <li class="nav-item" role="presentation">
-            <button aria-controls="messages" aria-selected="false" class="nav-link" data-bs-target="#messages"
-                    data-bs-toggle="tab" id="messages-tab" role="tab" type="button">Published Messages
+            <button class="nav-link" id="messages-tab" data-bs-toggle="tab" data-bs-target="#messages" type="button" role="tab" aria-controls="messages"
+                    aria-selected="false">Published Messages
             </button>
         </li>
         <li class="nav-item" role="presentation">
-            <button aria-controls="consumptions" aria-selected="false" class="nav-link"
-                    data-bs-target="#consumptions" data-bs-toggle="tab" id="consumptions-tab" role="tab"
-                    type="button">Consumptions
+            <button class="nav-link" id="consumptions-tab" data-bs-toggle="tab" data-bs-target="#consumptions" type="button" role="tab" aria-controls="consumptions"
+                    aria-selected="false">Consumptions
             </button>
         </li>
     </ul>
 
-    <div class="tab-content pt-3" id="pubSubTabContent">
-        <div aria-labelledby="clients-tab" class="tab-pane fade show active" id="clients" role="tabpanel">
-            <table class="table table-bordered table-hover" id="clientsTable">
-                <thead>
-                <tr>
-                    <th>Consumer</th>
-                    <th>Topic</th>
-                    <th>Connected At</th>
-                </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
+    <div class="tab-content" id="pubSubTabContent">
+        <div class="tab-pane fade show active" id="clients" role="tabpanel" aria-labelledby="clients-tab">
+            <div class="table-responsive">
+                <table class="table table-hover" id="clientsTable">
+                    <thead>
+                    <tr>
+                        <th>Consumer</th>
+                        <th>Topic</th>
+                        <th>Connected At</th>
+                    </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
         </div>
-        <div aria-labelledby="messages-tab" class="tab-pane fade" id="messages" role="tabpanel">
-            <table class="table table-bordered table-hover" id="messagesTable">
-                <thead>
-                <tr>
-                    <th>Producer</th>
-                    <th>Topic</th>
-                    <th>Message</th>
-                    <th>Timestamp</th>
-                </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
+        <div class="tab-pane fade" id="messages" role="tabpanel" aria-labelledby="messages-tab">
+            <div class="table-responsive">
+                <table class="table table-hover" id="messagesTable">
+                    <thead>
+                    <tr>
+                        <th>Producer</th>
+                        <th>Topic</th>
+                        <th>Message</th>
+                        <th>Timestamp</th>
+                    </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
         </div>
-        <div aria-labelledby="consumptions-tab" class="tab-pane fade" id="consumptions" role="tabpanel">
-            <table class="table table-bordered table-hover" id="consTable">
-                <thead>
-                <tr>
-                    <th>Consumer</th>
-                    <th>Topic</th>
-                    <th>Message</th>
-                    <th>Timestamp</th>
-                </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
+        <div class="tab-pane fade" id="consumptions" role="tabpanel" aria-labelledby="consumptions-tab">
+            <div class="table-responsive">
+                <table class="table table-hover" id="consTable">
+                    <thead>
+                    <tr>
+                        <th>Consumer</th>
+                        <th>Topic</th>
+                        <th>Message</th>
+                        <th>Timestamp</th>
+                    </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
         </div>
     </div>
-</div>
+</main>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/static/nav.js"></script>
 <script src="/static/control-panel.js"></script>
 </body>
 </html>

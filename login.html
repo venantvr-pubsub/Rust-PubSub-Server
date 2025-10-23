@@ -34,8 +34,12 @@
         }
 
         @keyframes pulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.05); }
+            0%, 100% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.05);
+            }
         }
 
         h1 {
@@ -131,93 +135,102 @@
         }
 
         @media (max-width: 600px) {
-            h1 { font-size: 32px; }
-            #loginBtn { font-size: 20px; padding: 20px 48px; }
-            .features { grid-template-columns: 1fr; }
+            h1 {
+                font-size: 32px;
+            }
+
+            #loginBtn {
+                font-size: 20px;
+                padding: 20px 48px;
+            }
+
+            .features {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="login-container">
-        <div class="logo">📊</div>
-        <h1>Pub/Sub Dashboard</h1>
-        <p>Visualisez en temps réel les messages, topics et consommateurs de votre système pub/sub</p>
+<div class="login-container">
+    <div class="logo">📊</div>
+    <h1>Pub/Sub Dashboard</h1>
+    <p>Visualisez en temps réel les messages, topics et consommateurs de votre système pub/sub</p>
 
-        <button id="loginBtn">Accéder au Dashboard</button>
+    <button id="loginBtn">Accéder au Dashboard</button>
 
-        <div class="status-message" id="statusMessage">
-            Connexion en cours...
-        </div>
-
-        <div class="features">
-            <div class="feature">
-                <div class="feature-icon">⚡</div>
-                <div class="feature-title">Temps Réel</div>
-                <div class="feature-desc">Événements Socket.IO en direct</div>
-            </div>
-            <div class="feature">
-                <div class="feature-icon">📈</div>
-                <div class="feature-title">Performance</div>
-                <div class="feature-desc">Monitoring optimisé et efficace</div>
-            </div>
-            <div class="feature">
-                <div class="feature-icon">🎨</div>
-                <div class="feature-title">Visualisation</div>
-                <div class="feature-desc">Graphiques interactifs et cartes</div>
-            </div>
-            <div class="feature">
-                <div class="feature-icon">🔒</div>
-                <div class="feature-title">Contrôle</div>
-                <div class="feature-desc">Activez uniquement quand nécessaire</div>
-            </div>
-        </div>
+    <div class="status-message" id="statusMessage">
+        Connexion en cours...
     </div>
 
-    <script>
-        const loginBtn = document.getElementById('loginBtn');
-        const statusMessage = document.getElementById('statusMessage');
+    <div class="features">
+        <div class="feature">
+            <div class="feature-icon">⚡</div>
+            <div class="feature-title">Temps Réel</div>
+            <div class="feature-desc">Événements Socket.IO en direct</div>
+        </div>
+        <div class="feature">
+            <div class="feature-icon">📈</div>
+            <div class="feature-title">Performance</div>
+            <div class="feature-desc">Monitoring optimisé et efficace</div>
+        </div>
+        <div class="feature">
+            <div class="feature-icon">🎨</div>
+            <div class="feature-title">Visualisation</div>
+            <div class="feature-desc">Graphiques interactifs et cartes</div>
+        </div>
+        <div class="feature">
+            <div class="feature-icon">🔒</div>
+            <div class="feature-title">Contrôle</div>
+            <div class="feature-desc">Activez uniquement quand nécessaire</div>
+        </div>
+    </div>
+</div>
 
-        loginBtn.addEventListener('click', async () => {
-            loginBtn.disabled = true;
-            statusMessage.classList.add('show');
-            statusMessage.textContent = 'Activation du dashboard...';
+<script>
+    const loginBtn = document.getElementById('loginBtn');
+    const statusMessage = document.getElementById('statusMessage');
 
-            try {
-                const response = await fetch('/dashboard/login', { method: 'POST' });
-                const data = await response.json();
+    loginBtn.addEventListener('click', async () => {
+        loginBtn.disabled = true;
+        statusMessage.classList.add('show');
+        statusMessage.textContent = 'Activation du dashboard...';
 
-                if (data.dashboard_enabled) {
-                    localStorage.setItem('dashboardEnabled', 'true');
-                    statusMessage.textContent = '✓ Dashboard activé !';
+        try {
+            const response = await fetch('/dashboard/login', {method: 'POST'});
+            const data = await response.json();
 
-                    // Get redirect target from URL parameter or default to control panel
-                    const urlParams = new URLSearchParams(window.location.search);
-                    const redirectTo = urlParams.get('redirect') || '/control-panel.html';
+            if (data.dashboard_enabled) {
+                localStorage.setItem('dashboardEnabled', 'true');
+                statusMessage.textContent = '✓ Dashboard activé !';
 
-                    setTimeout(() => {
-                        window.location.href = redirectTo;
-                    }, 500);
-                } else {
-                    throw new Error('Failed to enable dashboard');
-                }
-            } catch (error) {
-                console.error('Login error:', error);
-                statusMessage.textContent = '❌ Erreur de connexion';
-                statusMessage.style.color = '#ef4444';
-                loginBtn.disabled = false;
+                // Get redirect target from URL parameter or default to control panel
+                const urlParams = new URLSearchParams(window.location.search);
+                const redirectTo = urlParams.get('redirect') || '/control-panel.html';
 
                 setTimeout(() => {
-                    statusMessage.classList.remove('show');
-                }, 3000);
+                    window.location.href = redirectTo;
+                }, 500);
+            } else {
+                throw new Error('Failed to enable dashboard');
             }
-        });
+        } catch (error) {
+            console.error('Login error:', error);
+            statusMessage.textContent = '❌ Erreur de connexion';
+            statusMessage.style.color = '#ef4444';
+            loginBtn.disabled = false;
 
-        // If already logged in, redirect immediately
-        if (localStorage.getItem('dashboardEnabled') === 'true') {
-            const urlParams = new URLSearchParams(window.location.search);
-            const redirectTo = urlParams.get('redirect') || '/control-panel.html';
-            window.location.href = redirectTo;
+            setTimeout(() => {
+                statusMessage.classList.remove('show');
+            }, 3000);
         }
-    </script>
+    });
+
+    // If already logged in, redirect immediately
+    if (localStorage.getItem('dashboardEnabled') === 'true') {
+        const urlParams = new URLSearchParams(window.location.search);
+        const redirectTo = urlParams.get('redirect') || '/control-panel.html';
+        window.location.href = redirectTo;
+    }
+</script>
 </body>
 </html>

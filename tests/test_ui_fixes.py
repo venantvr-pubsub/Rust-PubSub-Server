@@ -13,6 +13,7 @@ import json
 
 SERVER_URL = 'http://localhost:5000'
 
+
 def test_publish_and_subscribe():
     """Test publishing and subscribing to verify UI updates"""
 
@@ -104,6 +105,7 @@ def test_publish_and_subscribe():
 
     return len(messages_received) >= 3
 
+
 if __name__ == '__main__':
     try:
         success = test_publish_and_subscribe()
@@ -111,5 +113,6 @@ if __name__ == '__main__':
     except Exception as e:
         print(f'\n✗ Test failed with error: {e}')
         import traceback
+
         traceback.print_exc()
         exit(1)

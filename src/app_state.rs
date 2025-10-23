@@ -1,6 +1,9 @@
 use crate::broker::Broker;
 use crate::cache::QueryCache;
-use std::{collections::HashMap, sync::{Arc, atomic::AtomicBool}};
+use std::{
+    collections::HashMap,
+    sync::{atomic::AtomicBool, Arc},
+};
 use tokio::sync::{broadcast, RwLock};
 
 #[derive(Clone)]

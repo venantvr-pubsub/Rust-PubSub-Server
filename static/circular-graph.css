@@ -1,34 +1,33 @@
-/* --- New styles for D3 graph --- */
-body {
-    overflow: hidden; /* Prevents scrolling */
-}
-
 #activity-graph-container {
     width: 100%;
-    height: calc(100vh - 100px); /* Viewport height minus nav bar */
     cursor: grab;
 }
 
-/* Link (arrow) styles */
+#loading-text {
+    fill: var(--text-muted-color);
+    font-size: 18px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-style: italic;
+}
+
 .link {
     stroke-opacity: 0.8;
     stroke-width: 3px;
-    fill: none; /* Important for <path> elements */
+    fill: none;
 }
 
 .link.publish {
-    stroke: #28a745; /* Green for publish */
+    stroke: #28a745;
 }
 
 .link.consume {
-    stroke: #ffab40; /* Orange for subscribe/consume */
+    stroke: #ffab40;
 }
 
 .link.consumed {
-    stroke: #dc3545; /* Red for consumed */
+    stroke: #ef4444;
 }
 
-/* Node (disk) styles */
 .node circle {
     stroke: #fff;
     stroke-width: 2px;
@@ -38,38 +37,30 @@ body {
     fill: #007bff;
 }
 
-/* Blue for producers */
 .node.topic circle {
     fill: #6c757d;
 }
 
-/* Gray for topics */
 .node.consumer circle {
     fill: #dc3545;
 }
 
-/* Red for consumers */
-
-/* Node text styles */
 .node text {
     pointer-events: none;
-    font-family: sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     font-size: 12px;
-    fill: #f8f9fa; /* Light text */
-    text-shadow: 0 1px 0 #343a40, 1px 0 0 #343a40, 0 -1px 0 #343a40, -1px 0 0 #343a40;
+    fill: var(--text-color);
+    text-shadow: 0 1px 2px #1a1a2e;
 }
 
-/* Animation for glow effect */
 @keyframes blink-effect {
     50% {
-        fill: #ffffff; /* Makes interior blink white */
-        stroke: #ffffff; /* Adds white border */
-        stroke-width: 4px; /* Border thickness for "glow" effect */
+        fill: #ffffff;
+        stroke: #ffffff;
+        stroke-width: 4px;
     }
 }
 
-/* Class to apply on node to trigger animation */
 .node.blink circle {
-    /* Duration of 500ms (half second), smooth animation */
     animation: blink-effect 500ms ease-out;
 }

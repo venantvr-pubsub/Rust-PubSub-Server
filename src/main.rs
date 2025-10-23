@@ -18,8 +18,7 @@ use database::init_database;
 use embedded::serve_embedded;
 use handlers::{
     clients_handler, consumptions_handler, dashboard_login_handler, dashboard_logout_handler,
-    dashboard_status_handler, graph_state_handler, health_check, messages_handler,
-    publish_handler,
+    dashboard_status_handler, graph_state_handler, health_check, messages_handler, publish_handler,
 };
 use socketioxide::SocketIo;
 use std::{net::SocketAddr, sync::Arc};
@@ -60,7 +59,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(async move {
         while let Ok(event) = event_rx.recv().await {
             // Only emit events if dashboard is enabled
-            if state_clone.dashboard_enabled.load(std::sync::atomic::Ordering::Relaxed) {
+            if state_clone
+                .dashboard_enabled
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
                 if let Some(ns) = io_clone.of("/") {
                     // Emit to all connected Socket.IO clients
                     let _ = ns.emit(event.event_type.as_str(), &event.data).await;

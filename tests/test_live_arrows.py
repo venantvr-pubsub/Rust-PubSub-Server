@@ -9,6 +9,7 @@ import time
 
 SERVER_URL = 'http://localhost:5000'
 
+
 def generate_live_traffic():
     """Generate continuous traffic to see arrows"""
 
@@ -57,6 +58,7 @@ def generate_live_traffic():
 
     sio.disconnect()
 
+
 if __name__ == '__main__':
     print('=' * 60)
     print('  CIRCULAR GRAPH - LIVE ARROWS TEST')
@@ -71,4 +73,5 @@ if __name__ == '__main__':
     except Exception as e:
         print(f'\n✗ Error: {e}')
         import traceback
+
         traceback.print_exc()
