@@ -284,3 +284,7 @@ curl http://localhost:5000/health
 ## License
 
 MIT
+
+## Stack
+
+[![Stack](https://skillicons.dev/icons?i=rust,sqlite,docker,js&theme=dark)](https://skillicons.dev)
