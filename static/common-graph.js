@@ -35,27 +35,6 @@ function createGraph(config) {
     const groupeLiens = g.append("g").attr("class", "links");
     const groupeNoeuds = g.append("g").attr("class", "nodes");
 
-    // --- Pointes de flèches ------------------------------------------------------------------
-    svg.append("defs").selectAll("marker")
-        .data(["publish", "consume", "consumed"])
-        .enter().append("marker")
-        .attr("id", d => `arrow-${d}`)
-        .attr("viewBox", "0 -5 10 10")
-        .attr("refX", config.arrow.refX)
-        .attr("refY", 0)
-        .attr("markerWidth", 6)
-        .attr("markerHeight", 6)
-        .attr("orient", config.arrow.orient)
-        .append("path")
-        .attr("d", "M0,-5L10,0L0,5")
-        .style("fill", d => couleurLien(d));
-
-    function couleurLien(type) {
-        if (type === 'publish') return '#28a745';
-        if (type === 'consume') return '#ffab40';
-        return '#dc3545';
-    }
-
     // --- Données -----------------------------------------------------------------------------
     let noeuds = [];
     const indexNoeuds = new Map();
@@ -129,11 +108,11 @@ function createGraph(config) {
             setTimeout(() => elementCible.classed('blink', false), 500);
         }
 
-        const lienTemporaire = config.drawLink(groupeLiens, noeudSource, noeudCible, type);
-        lienTemporaire.transition()
-            .duration(2000)
-            .style("opacity", 0)
-            .remove();
+        // `drawLink` produit une balle traçante qui s'anime, marque l'impact puis se retire
+        // toute seule : aucune transition de disparition à superposer ici.
+        // La liste complète des nœuds lui est transmise afin qu'elle puisse router le chemin en
+        // contournant ceux qui barrent la route.
+        config.drawLink(groupeLiens, noeudSource, noeudCible, type, noeuds);
     }
 
     function mettreAJourGraphe() {

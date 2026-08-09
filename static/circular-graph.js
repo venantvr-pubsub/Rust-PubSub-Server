@@ -1,29 +1,146 @@
 /**
  * circular-graph.js
  * Configure et initialise un graphe à disposition circulaire.
+ *
+ * Le tracé des liens n'est pas une simple droite ni un arc arbitraire : il est **routé**.
+ * Le chemin quitte le nœud source perpendiculairement à sa circonférence, contourne les nœuds
+ * qui se trouvent en travers en les prenant comme balises, puis aborde le nœud cible
+ * perpendiculairement lui aussi. Les angles du parcours sont adoucis par des congés.
  */
 
 document.addEventListener("DOMContentLoaded", () => {
-    // Calcule le chemin d'une ligne droite (et non courbe).
-    function calculerCheminDroit(source, cible) {
-        const rayon = 20; // Rayon des cercles représentant les nœuds.
-        const dx = cible.x - source.x;
-        const dy = cible.y - source.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
+    const RAYON_NOEUD = 20;
+    // Distance à laquelle le chemin passe du centre d'un nœud contourné. Au-delà du rayon du
+    // nœud, il faut de quoi loger le trait et son étiquette sans que ça paraisse frôlé.
+    const DEGAGEMENT = RAYON_NOEUD + 26;
+    // Longueur du segment d'amorce qui garantit une sortie — et une entrée — perpendiculaires.
+    const AMORCE = 28;
+    // Rayon maximal des congés adoucissant les angles du parcours.
+    const CONGE = 34;
 
-        if (distance === 0) return "";
+    const norme = (x, y) => Math.hypot(x, y);
 
-        // Calcule le point d'arrivée sur le bord du cercle cible.
-        const cibleX = cible.x - (dx / distance) * rayon;
-        const cibleY = cible.y - (dy / distance) * rayon;
+    /**
+     * Cherche les nœuds qui barrent la route entre `source` et `cible`, et produit pour chacun
+     * une balise : un point de passage décalé du côté opposé, à `DEGAGEMENT` de l'axe.
+     *
+     * @returns {Array<{t:number, x:number, y:number}>} balises ordonnées le long du trajet
+     */
+    function calculerBalises(source, cible, noeuds) {
+        const ax = source.x, ay = source.y;
+        const longueur = norme(cible.x - ax, cible.y - ay);
+        if (!(longueur > 0)) return [];
 
-        return `M${source.x},${source.y}L${cibleX},${cibleY}`;
+        // Vecteur unitaire le long de l'axe, et sa normale.
+        const ux = (cible.x - ax) / longueur;
+        const uy = (cible.y - ay) / longueur;
+        const nx = -uy;
+        const ny = ux;
+
+        const balises = [];
+        for (const noeud of noeuds) {
+            if (noeud === source || noeud === cible) continue;
+            if (typeof noeud.x !== 'number' || typeof noeud.y !== 'number') continue;
+
+            const dx = noeud.x - ax;
+            const dy = noeud.y - ay;
+
+            // Projection sur l'axe : à quelle distance du départ le nœud se situe-t-il ?
+            const t = dx * ux + dy * uy;
+            // Hors du segment (derrière le départ ou après l'arrivée) : il ne gêne pas.
+            if (t <= RAYON_NOEUD || t >= longueur - RAYON_NOEUD) continue;
+
+            // Écart signé par rapport à l'axe : le signe indique de quel côté il se trouve.
+            const ecart = dx * nx + dy * ny;
+            if (Math.abs(ecart) >= DEGAGEMENT) continue; // assez loin, rien à contourner
+
+            // On passe du côté opposé au nœud. À écart nul, le choix est arbitraire mais stable.
+            const cote = ecart >= 0 ? -1 : 1;
+            balises.push({
+                t,
+                x: ax + ux * t + nx * cote * DEGAGEMENT,
+                y: ay + uy * t + ny * cote * DEGAGEMENT
+            });
+        }
+
+        balises.sort((a, b) => a.t - b.t);
+        return balises;
+    }
+
+    /**
+     * Construit la suite de points du parcours, amorces perpendiculaires comprises.
+     */
+    function calculerParcours(source, cible, noeuds) {
+        const balises = calculerBalises(source, cible, noeuds);
+
+        // La direction de sortie vise la première balise — ou directement la cible s'il n'y en a
+        // aucune. C'est elle qui fixe le point de sortie sur la circonférence, donc la
+        // perpendiculaire.
+        const premier = balises.length ? balises[0] : cible;
+        const dernier = balises.length ? balises[balises.length - 1] : source;
+
+        const sortie = direction(source, premier);
+        const entree = direction(cible, dernier);
+        if (!sortie || !entree) return null;
+
+        return [
+            // Point de sortie sur la circonférence du nœud source, puis amorce dans l'axe du
+            // rayon : les deux premiers points sont alignés sur la normale, donc le départ est
+            // perpendiculaire au nœud.
+            {x: source.x + sortie.x * RAYON_NOEUD, y: source.y + sortie.y * RAYON_NOEUD},
+            {x: source.x + sortie.x * (RAYON_NOEUD + AMORCE), y: source.y + sortie.y * (RAYON_NOEUD + AMORCE)},
+            ...balises,
+            // Symétriquement côté cible : amorce puis point d'entrée, alignés sur son rayon.
+            {x: cible.x + entree.x * (RAYON_NOEUD + AMORCE), y: cible.y + entree.y * (RAYON_NOEUD + AMORCE)},
+            {x: cible.x + entree.x * RAYON_NOEUD, y: cible.y + entree.y * RAYON_NOEUD}
+        ];
+    }
+
+    /** Vecteur unitaire de `depuis` vers `vers`, ou null si les deux points sont confondus. */
+    function direction(depuis, vers) {
+        const dx = vers.x - depuis.x;
+        const dy = vers.y - depuis.y;
+        const d = norme(dx, dy);
+        if (!(d > 0)) return null;
+        return {x: dx / d, y: dy / d};
+    }
+
+    /**
+     * Transforme une ligne brisée en chemin adouci : chaque sommet devient un congé quadratique.
+     * Le rayon est borné par la moitié du plus court des deux segments adjacents, pour qu'un
+     * virage serré ne déborde jamais sur le suivant.
+     */
+    function cheminAdouci(points, rayonMax) {
+        if (!points || points.length < 2) return '';
+
+        let d = `M${points[0].x},${points[0].y}`;
+
+        for (let i = 1; i < points.length - 1; i++) {
+            const precedent = points[i - 1];
+            const sommet = points[i];
+            const suivant = points[i + 1];
+
+            const v1 = {x: precedent.x - sommet.x, y: precedent.y - sommet.y};
+            const v2 = {x: suivant.x - sommet.x, y: suivant.y - sommet.y};
+            const l1 = norme(v1.x, v1.y);
+            const l2 = norme(v2.x, v2.y);
+            // Sommet confondu avec un voisin : pas de virage à adoucir.
+            if (!(l1 > 0) || !(l2 > 0)) continue;
+
+            const rayon = Math.min(rayonMax, l1 / 2, l2 / 2);
+            const avant = {x: sommet.x + (v1.x / l1) * rayon, y: sommet.y + (v1.y / l1) * rayon};
+            const apres = {x: sommet.x + (v2.x / l2) * rayon, y: sommet.y + (v2.y / l2) * rayon};
+
+            d += `L${avant.x},${avant.y}Q${sommet.x},${sommet.y} ${apres.x},${apres.y}`;
+        }
+
+        const fin = points[points.length - 1];
+        return `${d}L${fin.x},${fin.y}`;
     }
 
     // Configuration spécifique au graphe circulaire.
     const configurationGrapheCirculaire = {
         svgSelector: "#activity-svg",
-        arrow: {refX: 2, orient: "auto-start-reverse"},
 
         createSimulation: (largeur, hauteur) => {
             return d3.forceSimulation()
@@ -47,89 +164,26 @@ document.addEventListener("DOMContentLoaded", () => {
             });
         },
 
-        drawLink: (groupeLiens, noeudSource, noeudCible, type) => {
-            // Groupe dédié à l'animation de la flèche.
-            const groupeFleche = groupeLiens.append("g")
-                .datum({source: noeudSource, target: noeudCible, type: type});
+        drawLink: (groupeLiens, noeudSource, noeudCible, type, noeuds) => {
+            const parcours = calculerParcours(noeudSource, noeudCible, noeuds || []);
+            const chemin = cheminAdouci(parcours, CONGE);
+            if (!chemin) return d3.select(null);
 
-            // Trace la ligne de base invisible, qui sert de chemin de référence.
-            const ligneBase = groupeFleche.append("path")
-                .attr("class", "base-line")
-                .attr("d", calculerCheminDroit(noeudSource, noeudCible))
-                .style("stroke", "none")
-                .style("fill", "none");
+            // La balle traçante suit le parcours puis se retire d'elle-même. On l'injecte dans le
+            // groupe des liens pour qu'elle hérite des transformations de zoom et de panoramique.
+            const tir = window.Tracer.tirerSurChemin(groupeLiens.node(), chemin, type);
 
-            // Couleur en fonction du type d'événement.
-            const couleurFleche = type === 'publish' ? '#28a745' : type === 'consume' ? '#ffab40' : '#dc3545';
-
-            // Flèche animée (court segment terminé par une pointe).
-            const flecheAnimee = groupeFleche.append("path")
-                .attr("class", `animated-arrow ${type}`)
-                .attr("marker-end", `url(#arrow-${type})`)
-                .style("stroke", couleurFleche)
-                .style("stroke-width", 2)
-                .style("fill", "none");
-
-            // Longueur du chemin, nécessaire à l'animation.
-            const noeudChemin = ligneBase.node();
-            const longueurChemin = noeudChemin.getTotalLength();
-
-            // Un chemin de longueur nulle (source et cible au même point) n'offre aucun point à
-            // échantillonner : `getPointAtLength` n'aurait aucun sens et la flèche serait de toute
-            // façon invisible.
-            if (!(longueurChemin > 0)) return groupeFleche;
-
-            // Animation du déplacement de la flèche le long du chemin.
-            const dureeAnimation = 800; // 800 ms pour parcourir le chemin.
-            // Longueur du segment visible. C'était auparavant une valeur fixe de 500 px, bien
-            // supérieure à n'importe quelle corde du cercle de disposition : la flèche
-            // « voyageuse » n'était donc en réalité qu'un trait qui s'allongeait depuis le nœud
-            // source, sans jamais s'en détacher. On la met à l'échelle du chemin, avec un plancher
-            // pour que les liens très courts restent visibles.
-            const longueurFleche = Math.max(24, longueurChemin * 0.25);
-
-            function animerFleche() {
-                const instantDepart = performance.now();
-
-                function image(maintenant) {
-                    const ecoule = maintenant - instantDepart;
-                    const progression = Math.min(ecoule / dureeAnimation, 1);
-
-                    // Position courante le long du chemin.
-                    const longueurCourante = longueurChemin * progression;
-                    const pointDepart = Math.max(0, longueurCourante - longueurFleche);
-                    const pointArrivee = longueurCourante;
-
-                    const debut = noeudChemin.getPointAtLength(pointDepart);
-                    const fin = noeudChemin.getPointAtLength(pointArrivee);
-
-                    flecheAnimee.attr("d", `M${debut.x},${debut.y}L${fin.x},${fin.y}`);
-
-                    if (progression < 1) {
-                        requestAnimationFrame(image);
-                    }
-                }
-
-                requestAnimationFrame(image);
-            }
-
-            animerFleche();
-
-            return groupeFleche;
+            // `common-graph.js` attend une sélection D3 ; une sélection vide absorbe sans effet
+            // les appels lorsqu'aucun élément n'a pu être créé.
+            return tir ? d3.select(tir) : d3.select(null);
         },
 
-        tickHandler: (groupeNoeuds, groupeLiens) => {
+        tickHandler: (groupeNoeuds) => {
             groupeNoeuds.selectAll('.node')
                 .attr("transform", d => `translate(${d.x || 0},${d.y || 0})`);
-            // Met à jour les chemins rectilignes à chaque battement de la simulation.
-            groupeLiens.selectAll('g').each(function (d) {
-                // Les groupes créés hors de `drawLink` ne portent pas de donnée : on les ignore
-                // plutôt que de lever une exception.
-                if (!d || !d.source || !d.target) return;
-                const groupe = d3.select(this);
-                groupe.select('.base-line').attr("d", calculerCheminDroit(d.source, d.target));
-                // Remarque : la flèche animée se met à jour d'elle-même pendant l'animation.
-            });
+            // Les balles traçantes ne sont pas recalculées à chaque battement : elles vivent moins
+            // d'une seconde, pendant laquelle les nœuds — épinglés par `positionNodes` — ne
+            // bougent pas.
         }
     };
 

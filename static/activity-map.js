@@ -2,7 +2,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const {trackConnection, fetchJson, setConnectionState} = window.DashboardUtils;
 
     const svg = document.getElementById('map-svg');
-    const NS_SVG = 'http://www.w3.org/2000/svg';
 
     // Budget de nœuds par colonne. La carte ajoutait auparavant un <div> pour chaque nom distinct
     // jamais rencontré, sans jamais en retirer : sur un broker de longue durée avec des noms de
@@ -111,50 +110,19 @@ document.addEventListener("DOMContentLoaded", () => {
         if (rectDepart.bottom < rectCarte.top || rectDepart.top > rectCarte.bottom) return;
         if (rectArrivee.bottom < rectCarte.top || rectArrivee.top > rectCarte.bottom) return;
 
-        const ligne = document.createElementNS(NS_SVG, 'line');
-        ligne.setAttribute('x1', String(rectDepart.right - rectCarte.left));
-        ligne.setAttribute('y1', String(rectDepart.top + rectDepart.height / 2 - rectCarte.top));
-        ligne.setAttribute('x2', String(rectArrivee.left - rectCarte.left));
-        ligne.setAttribute('y2', String(rectArrivee.top + rectArrivee.height / 2 - rectCarte.top));
-        ligne.setAttribute('class', `message-arrow ${typeFleche}`);
-        ligne.setAttribute('marker-end', `url(#arrowhead-${typeFleche})`);
-
-        svg.appendChild(ligne);
         flechesVivantes++;
+        // La balle traçante gère son propre cycle de vie : elle s'anime, marque l'impact, puis se
+        // retire d'elle-même. Plus de pointe de flèche : c'est la tête lumineuse en mouvement qui
+        // porte la direction, et elle la porte mieux qu'un triangle statique.
+        const tir = window.Tracer.tirer(svg, {
+            x1: rectDepart.right - rectCarte.left,
+            y1: rectDepart.top + rectDepart.height / 2 - rectCarte.top,
+            x2: rectArrivee.left - rectCarte.left,
+            y2: rectArrivee.top + rectArrivee.height / 2 - rectCarte.top
+        }, typeFleche, {onFin: () => { flechesVivantes--; }});
 
-        // `ligne.remove()` ne fait rien si le nœud est déjà détaché, contrairement à
-        // `svg.removeChild(ligne)` qui lève une NotFoundError.
-        setTimeout(() => {
-            ligne.remove();
-            flechesVivantes--;
-        }, 1000);
-    }
-
-    // --- Pointes de flèches ------------------------------------------------------------------
-    function construireMarqueurs() {
-        const defs = document.createElementNS(NS_SVG, 'defs');
-        const marqueurs = [
-            {id: 'arrowhead-publish', remplissage: '#22c55e'},
-            {id: 'arrowhead-consume', remplissage: '#ffab40'},
-            {id: 'arrowhead-consumed', remplissage: '#ef4444'}
-        ];
-
-        for (const {id, remplissage} of marqueurs) {
-            const marqueur = document.createElementNS(NS_SVG, 'marker');
-            marqueur.setAttribute('id', id);
-            marqueur.setAttribute('viewBox', '0 0 10 10');
-            marqueur.setAttribute('refX', '8');
-            marqueur.setAttribute('refY', '5');
-            marqueur.setAttribute('markerWidth', '6');
-            marqueur.setAttribute('markerHeight', '6');
-            marqueur.setAttribute('orient', 'auto-start-reverse');
-            const chemin = document.createElementNS(NS_SVG, 'path');
-            chemin.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
-            chemin.setAttribute('fill', remplissage);
-            marqueur.appendChild(chemin);
-            defs.appendChild(marqueur);
-        }
-        svg.appendChild(defs);
+        // Trajet de longueur nulle : rien n'a été créé, il faut rendre le jeton immédiatement.
+        if (!tir) flechesVivantes--;
     }
 
     // --- État initial ------------------------------------------------------------------------
@@ -172,7 +140,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // --- Branchements ------------------------------------------------------------------------
-    construireMarqueurs();
     for (const type of Object.keys(colonnes)) synchroniserTexteAttente(type);
 
     const socket = trackConnection(io(), 'activité');

@@ -79,23 +79,6 @@
     z-index: 3;
 }
 
-.message-arrow {
-    stroke-width: 2;
-    animation: fadeInOut 1s ease-in-out;
-}
-
-.message-arrow.publish {
-    stroke: #22c55e;
-}
-
-.message-arrow.consume {
-    stroke: #ffab40;
-}
-
-.message-arrow.consumed {
-    stroke: #ef4444;
-}
-
 @keyframes fadeIn {
     from {
         opacity: 0;
@@ -116,20 +99,5 @@
     }
     100% {
         transform: scale(1);
-    }
-}
-
-@keyframes fadeInOut {
-    0% {
-        opacity: 0;
-    }
-    25% {
-        opacity: 1;
-    }
-    75% {
-        opacity: 1;
-    }
-    100% {
-        opacity: 0;
     }
 }
