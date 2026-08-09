@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8"/>
     <meta content="width=device-width, initial-scale=1" name="viewport"/>
@@ -15,6 +15,11 @@
 <header id="main-header"></header>
 
 <main class="container dashboard-main d-flex flex-column">
+    <div class="legend" role="note" aria-label="Légende">
+        <span class="legend-item"><span class="legend-line publish"></span>Publication</span>
+        <span class="legend-item"><span class="legend-line consume"></span>Livraison</span>
+        <span class="legend-item"><span class="legend-line consumed"></span>Accusé de consommation</span>
+    </div>
     <div id="activity-map" class="flex-grow-1">
         <div class="map-column" id="producers-col"><h2>Producers</h2></div>
         <div class="map-column" id="topics-col"><h2>Topics</h2></div>

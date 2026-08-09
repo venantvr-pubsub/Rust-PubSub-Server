@@ -14,13 +14,13 @@ document.addEventListener('DOMContentLoaded', function () {
     document.title = `${currentItem.label} - Pub/Sub Monitor`;
 
     const nav = document.createElement('nav');
-    nav.className = 'navbar navbar-dark fixed-top';
+    nav.className = 'navbar navbar-dark';
 
     const container = document.createElement('div');
     container.className = 'container';
 
     const left = document.createElement('div');
-    left.className = 'd-flex align-items-center';
+    left.className = 'd-flex align-items-center flex-wrap gap-2';
 
     const brand = document.createElement('a');
     brand.className = 'navbar-brand';
@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', function () {
     left.appendChild(brand);
 
     const links = document.createElement('div');
-    links.className = 'ms-4 d-flex gap-2';
+    links.className = 'd-flex gap-2 flex-wrap';
     for (const item of navItems) {
         const link = document.createElement('a');
         link.className = item.href === currentPath ? 'nav-link active' : 'nav-link';

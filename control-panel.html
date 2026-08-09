@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8"/>
     <meta content="width=device-width, initial-scale=1" name="viewport"/>
@@ -37,19 +37,19 @@
         <div class="card-body">
             <h2 class="card-title">Publish Message</h2>
             <div class="row g-3 align-items-end">
-                <div class="col">
+                <div class="col-12 col-md">
                     <label class="form-label" for="pubTopic">Topic</label>
                     <input class="form-control" id="pubTopic" type="text" placeholder="e.g., orders">
                 </div>
-                <div class="col">
+                <div class="col-12 col-md">
                     <label class="form-label" for="pubProducer">Producer Name</label>
                     <input class="form-control" id="pubProducer" type="text" value="frontend_publisher"/>
                 </div>
-                <div class="col">
+                <div class="col-12 col-md">
                     <label class="form-label" for="pubMessage">Message</label>
                     <input class="form-control" id="pubMessage" type="text" placeholder="Your message here"/>
                 </div>
-                <div class="col-auto">
+                <div class="col-12 col-md-auto">
                     <button class="btn btn-success w-100" id="pubBtn">Publish</button>
                 </div>
             </div>

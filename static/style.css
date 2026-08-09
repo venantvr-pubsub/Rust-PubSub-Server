@@ -30,13 +30,71 @@ main {
     overflow-y: auto;
 }
 
-/* Cadre de page partagé : dégage la barre de navigation fixe et laisse de la marge en bas.
-   Remplace le `style="padding-top: 80px; ..."` en ligne, dupliqué sur chaque page. */
+/* Cadre de page partagé. L'en-tête n'est plus `fixed-top` : il occupe sa hauteur réelle dans le
+   flux et c'est `main` qui défile, donc plus besoin de deviner un `padding-top` pour le compenser.
+   L'ancienne valeur de 80 px en dur masquait le haut du contenu dès que la barre passait sur deux
+   lignes, ce qui arrivait systématiquement sur téléphone. */
 .dashboard-main {
-    padding-top: 80px;
+    padding-top: 1.5rem;
     padding-bottom: 2rem;
     min-height: 0; /* laisse les enfants flex se rétrécir pour que les conteneurs de graphe se dimensionnent */
 }
+
+/* --- Légende des graphes ---
+   Sans elle, rien n'indiquait ce que signifient un cercle bleu, un cercle rouge ou une flèche
+   orange : les deux pages de visualisation étaient joliment animées mais indéchiffrables. */
+.legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1.25rem;
+    padding: 0.6rem 1rem;
+    margin-bottom: 0.75rem;
+    background-color: var(--secondary-color);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    font-size: 0.85rem;
+    color: var(--text-muted-color);
+    flex-shrink: 0;
+}
+
+.legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    white-space: nowrap;
+}
+
+.legend-separator {
+    width: 1px;
+    align-self: stretch;
+    background-color: var(--border-color);
+}
+
+.legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    flex-shrink: 0;
+}
+
+/* Ces couleurs doivent rester alignées sur circular-graph.css (.node.* circle)
+   et sur couleurLien() dans common-graph.js. */
+.legend-dot.producer { background-color: #007bff; }
+.legend-dot.topic { background-color: #6c757d; }
+.legend-dot.consumer { background-color: #dc3545; }
+
+.legend-line {
+    width: 22px;
+    height: 0;
+    border-top: 3px solid;
+    flex-shrink: 0;
+}
+
+.legend-line.publish { border-color: #22c55e; }
+.legend-line.consume { border-color: #ffab40; }
+.legend-line.consumed { border-color: #ef4444; }
 
 /* --- Indicateur de connexion (piloté par DashboardUtils.setConnectionState) --- */
 .connection-status {
@@ -86,6 +144,10 @@ h2 {
     padding-bottom: 0.75rem;
 }
 
+#main-header {
+    flex-shrink: 0;
+}
+
 #main-header .navbar {
     background-color: var(--primary-color) !important;
     padding: 0.5rem 0;
@@ -95,9 +157,12 @@ h2 {
 #main-header .container {
     display: flex;
     align-items: center;
-    gap: 1.5rem;
+    gap: 0.5rem 1.5rem;
     padding-left: 1.5rem;
     padding-right: 1.5rem;
+    /* Sur écran étroit, la barre débordait : les liens « Activity Map » et « Circular Graph »
+       étaient purement et simplement coupés hors de l'écran, sans moyen de les atteindre. */
+    flex-wrap: wrap;
 }
 
 .navbar-brand {
