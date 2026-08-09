@@ -1,127 +1,135 @@
-// Dashboard Guard - Intercepts page access and redirects to login if the dashboard is not enabled.
-// This script MUST be included FIRST on every dashboard page (including login.html, which uses it
-// only for the shared redirect-target helpers).
+// Garde du dashboard — intercepte l'accès aux pages et redirige vers la page de connexion
+// lorsque le dashboard n'est pas activé.
+// Ce script DOIT être inclus en PREMIER sur chaque page du dashboard (y compris login.html, qui ne
+// s'en sert que pour les fonctions utilitaires de redirection partagées).
 //
-// Note on the threat model: `dashboardEnabled` in localStorage is a *convenience* flag, not a
-// security boundary. The real state lives server-side (`/dashboard/status`) and is global to the
-// process. The guard reconciles the two so a stale localStorage entry (e.g. after a server restart)
-// cannot leave the user staring at a dashboard that will never receive an event.
+// À propos du modèle de menace : le drapeau `dashboardEnabled` dans localStorage est un simple
+// confort d'usage, pas une frontière de sécurité. L'état réel vit côté serveur
+// (`/dashboard/status`) et il est global au processus. La garde réconcilie les deux pour qu'une
+// entrée localStorage périmée (après un redémarrage du serveur, par exemple) ne laisse pas
+// l'utilisateur devant un dashboard qui ne recevra jamais le moindre événement.
 
 (function () {
     'use strict';
 
-    // Pages that require the dashboard to be enabled.
-    const PROTECTED_PAGES = [
+    // Pages qui exigent que le dashboard soit activé.
+    const PAGES_PROTEGEES = [
         '/control-panel.html',
         '/activity-map.html',
         '/circular-graph.html'
     ];
 
-    const LOGIN_PAGE = '/login.html';
-    const DEFAULT_PAGE = '/control-panel.html';
-    const STORAGE_KEY = 'dashboardEnabled';
+    const PAGE_CONNEXION = '/login.html';
+    const PAGE_PAR_DEFAUT = '/control-panel.html';
+    const CLE_STOCKAGE = 'dashboardEnabled';
 
-    // localStorage throws in a few browser configurations (private mode quotas, disabled storage).
-    // Failing closed here would lock the user out of the dashboard entirely, so degrade gracefully.
-    function readEnabled() {
+    // localStorage lève une exception dans certaines configurations de navigateur (navigation
+    // privée saturée, stockage désactivé). Échouer en mode « fermé » interdirait purement et
+    // simplement l'accès au dashboard : on dégrade donc proprement.
+    function lireActivation() {
         try {
-            return window.localStorage.getItem(STORAGE_KEY) === 'true';
+            return window.localStorage.getItem(CLE_STOCKAGE) === 'true';
         } catch (_) {
             return false;
         }
     }
 
-    function writeEnabled(value) {
+    function ecrireActivation(valeur) {
         try {
-            window.localStorage.setItem(STORAGE_KEY, value ? 'true' : 'false');
+            window.localStorage.setItem(CLE_STOCKAGE, valeur ? 'true' : 'false');
         } catch (_) {
-            /* storage unavailable - the server flag remains the source of truth */
+            /* stockage indisponible — le drapeau serveur reste la source de vérité */
         }
     }
 
-    // Only ever redirect to a known same-origin dashboard page.
-    // Without this, `/login.html?redirect=https://evil.example` is an open redirect.
-    function safeRedirectTarget(rawTarget) {
-        if (!rawTarget) return DEFAULT_PAGE;
-        // A protocol-relative ("//evil.example") or absolute URL must never be honoured.
-        if (!rawTarget.startsWith('/') || rawTarget.startsWith('//')) return DEFAULT_PAGE;
-        return PROTECTED_PAGES.includes(rawTarget) ? rawTarget : DEFAULT_PAGE;
+    // On ne redirige jamais que vers une page connue du dashboard, sur la même origine.
+    // Sans ce contrôle, `/login.html?redirect=https://exemple-malveillant` constitue une
+    // redirection ouverte.
+    function cibleRedirectionSure(cibleBrute) {
+        if (!cibleBrute) return PAGE_PAR_DEFAUT;
+        // Une URL absolue ou relative au protocole (« //exemple-malveillant ») ne doit jamais
+        // être honorée.
+        if (!cibleBrute.startsWith('/') || cibleBrute.startsWith('//')) return PAGE_PAR_DEFAUT;
+        return PAGES_PROTEGEES.includes(cibleBrute) ? cibleBrute : PAGE_PAR_DEFAUT;
     }
 
-    const currentPath = window.location.pathname;
-    const isProtectedPage = PROTECTED_PAGES.includes(currentPath);
-    const isDashboardEnabled = readEnabled();
+    const cheminCourant = window.location.pathname;
+    const estPageProtegee = PAGES_PROTEGEES.includes(cheminCourant);
+    const dashboardActive = lireActivation();
 
-    function redirectToLogin() {
-        window.location.replace(`${LOGIN_PAGE}?redirect=${encodeURIComponent(currentPath)}`);
+    function redirigerVersConnexion() {
+        window.location.replace(`${PAGE_CONNEXION}?redirect=${encodeURIComponent(cheminCourant)}`);
     }
 
-    // `setupLogout` is called both from this script (once the DOM is ready) and from nav.js (once
-    // the header markup exists). Whichever runs after the button exists wins; the flag keeps the
-    // click handler from being attached twice, which would fire two logout requests per click.
-    let logoutBound = false;
+    // `installerDeconnexion` est appelée à la fois par ce script (dès que le DOM est prêt) et par
+    // nav.js (une fois le balisage de l'en-tête créé). Celle qui s'exécute après l'apparition du
+    // bouton l'emporte ; le drapeau empêche d'attacher deux fois le gestionnaire de clic, ce qui
+    // déclencherait deux requêtes de déconnexion par clic.
+    let deconnexionInstallee = false;
 
-    function setupLogout() {
-        if (logoutBound) return;
-        const logoutBtn = document.getElementById('dashboardLogoutBtn');
-        if (!logoutBtn) return;
-        logoutBound = true;
+    function installerDeconnexion() {
+        if (deconnexionInstallee) return;
+        const bouton = document.getElementById('dashboardLogoutBtn');
+        if (!bouton) return;
+        deconnexionInstallee = true;
 
-        logoutBtn.addEventListener('click', async () => {
-            logoutBtn.disabled = true;
+        bouton.addEventListener('click', async () => {
+            bouton.disabled = true;
             try {
                 await fetch('/dashboard/logout', {method: 'POST'});
-            } catch (error) {
-                console.error('Logout error:', error);
+            } catch (erreur) {
+                console.error('Erreur de déconnexion :', erreur);
             } finally {
-                // Whatever the server said, drop the local flag and leave the dashboard.
-                writeEnabled(false);
-                window.location.href = LOGIN_PAGE;
+                // Quoi qu'ait répondu le serveur, on abandonne le drapeau local et on quitte.
+                ecrireActivation(false);
+                window.location.href = PAGE_CONNEXION;
             }
         });
     }
 
-    // Reconcile the local flag with the server. A server restart resets `dashboard_enabled` to
-    // false, and without this check the page would load, connect, and then silently receive
-    // nothing forever.
-    async function verifyWithServer() {
+    // Réconcilie le drapeau local avec le serveur. Un redémarrage du serveur remet
+    // `dashboard_enabled` à false ; sans ce contrôle, la page se chargeait, se connectait, puis ne
+    // recevait plus jamais rien, en silence.
+    async function verifierAupresDuServeur() {
         try {
-            const response = await fetch('/dashboard/status');
-            if (!response.ok) return;
-            const data = await response.json();
-            if (data.dashboard_enabled === false) {
-                writeEnabled(false);
-                redirectToLogin();
+            const reponse = await fetch('/dashboard/status');
+            if (!reponse.ok) return;
+            const donnees = await reponse.json();
+            if (donnees.dashboard_enabled === false) {
+                ecrireActivation(false);
+                redirigerVersConnexion();
             }
-        } catch (error) {
-            // Network hiccup: keep the page usable rather than bouncing the user to login.
-            console.warn('Could not verify dashboard status:', error);
+        } catch (erreur) {
+            // Incident réseau : on garde la page utilisable plutôt que de renvoyer l'utilisateur
+            // vers la page de connexion.
+            console.warn('Impossible de vérifier l\'état du dashboard :', erreur);
         }
     }
 
-    if (isProtectedPage && !isDashboardEnabled) {
-        redirectToLogin();
-        // Stop this script here. Note that later <script> tags on the page still execute until the
-        // navigation commits, which is why each page's own script is also defensive.
-        throw new Error('Redirecting to login page');
+    if (estPageProtegee && !dashboardActive) {
+        redirigerVersConnexion();
+        // On arrête ce script ici. À noter que les balises <script> suivantes de la page
+        // continuent de s'exécuter jusqu'à ce que la navigation soit effective : c'est pourquoi le
+        // script propre à chaque page reste lui aussi défensif.
+        throw new Error('Redirection vers la page de connexion');
     }
 
-    if (isProtectedPage) {
+    if (estPageProtegee) {
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', setupLogout);
+            document.addEventListener('DOMContentLoaded', installerDeconnexion);
         } else {
-            setupLogout();
+            installerDeconnexion();
         }
-        verifyWithServer();
+        verifierAupresDuServeur();
     }
 
     window.dashboardGuard = {
-        isAuthenticated: isDashboardEnabled,
-        protectedPages: PROTECTED_PAGES.slice(),
-        defaultPage: DEFAULT_PAGE,
-        safeRedirectTarget,
-        readEnabled,
-        writeEnabled,
-        setupLogout
+        isAuthenticated: dashboardActive,
+        protectedPages: PAGES_PROTEGEES.slice(),
+        defaultPage: PAGE_PAR_DEFAUT,
+        safeRedirectTarget: cibleRedirectionSure,
+        readEnabled: lireActivation,
+        writeEnabled: ecrireActivation,
+        setupLogout: installerDeconnexion
     };
 })();

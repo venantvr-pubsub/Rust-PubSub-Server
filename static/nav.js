@@ -43,9 +43,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const right = document.createElement('div');
     right.className = 'd-flex align-items-center gap-3 ms-auto';
 
-    // Live connection indicator, driven by DashboardUtils.setConnectionState().
-    // Previously nothing on the page told you whether the event stream was alive, so a dead
-    // socket looked exactly like an idle system.
+    // Indicateur de connexion en direct, piloté par DashboardUtils.setConnectionState().
+    // Auparavant, rien sur la page n'indiquait si le flux d'événements était vivant : un socket
+    // mort ressemblait exactement à un système au repos.
     const status = document.createElement('span');
     status.id = 'connectionStatus';
     status.className = 'connection-status';
@@ -65,8 +65,9 @@ document.addEventListener('DOMContentLoaded', function () {
     nav.appendChild(container);
     navContainer.replaceChildren(nav);
 
-    // The guard registered its own DOMContentLoaded handler before this one, so at that point the
-    // button did not exist yet. Tell it to bind now; setupLogout() is idempotent.
+    // La garde a enregistré son propre gestionnaire DOMContentLoaded avant celui-ci : à ce
+    // moment-là, le bouton n'existait pas encore. On lui demande donc de s'attacher maintenant ;
+    // setupLogout() est idempotente.
     if (window.dashboardGuard && typeof window.dashboardGuard.setupLogout === 'function') {
         window.dashboardGuard.setupLogout();
     }

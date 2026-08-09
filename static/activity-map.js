@@ -2,210 +2,216 @@ document.addEventListener("DOMContentLoaded", () => {
     const {trackConnection, fetchJson, setConnectionState} = window.DashboardUtils;
 
     const svg = document.getElementById('map-svg');
-    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const NS_SVG = 'http://www.w3.org/2000/svg';
 
-    // Per-column node budget. The map used to append a <div> for every distinct name it ever saw
-    // and never removed one, so a long-running broker with rotating producer names grew the DOM
-    // without bound and pushed everything off-screen. Columns are now capped and scroll.
-    const MAX_NODES_PER_COLUMN = 60;
+    // Budget de nœuds par colonne. La carte ajoutait auparavant un <div> pour chaque nom distinct
+    // jamais rencontré, sans jamais en retirer : sur un broker de longue durée avec des noms de
+    // producteurs tournants, le DOM grossissait sans limite et poussait tout hors de l'écran.
+    // Les colonnes sont désormais plafonnées et défilent.
+    const MAX_NOEUDS_PAR_COLONNE = 60;
 
-    // Cap on simultaneously animating arrows. Each arrow is an SVG element with a 1s lifetime; at
-    // a few thousand messages/second the browser spends all its time creating and destroying them.
-    const MAX_LIVE_ARROWS = 120;
+    // Plafond de flèches animées simultanément. Chaque flèche est un élément SVG d'une durée de
+    // vie d'une seconde ; à quelques milliers de messages par seconde, le navigateur passe son
+    // temps à les créer et les détruire.
+    const MAX_FLECHES_VIVANTES = 120;
 
-    const columns = {
-        producer: {el: document.getElementById('producers-col'), nodes: new Map()},
-        topic: {el: document.getElementById('topics-col'), nodes: new Map()},
-        consumer: {el: document.getElementById('consumers-col'), nodes: new Map()}
+    const colonnes = {
+        producer: {el: document.getElementById('producers-col'), noeuds: new Map()},
+        topic: {el: document.getElementById('topics-col'), noeuds: new Map()},
+        consumer: {el: document.getElementById('consumers-col'), noeuds: new Map()}
     };
 
-    let liveArrows = 0;
+    let flechesVivantes = 0;
 
-    // --- Placeholders ------------------------------------------------------------------------
-    function syncPlaceholder(type) {
-        const column = columns[type];
-        const existing = column.el.querySelector('.placeholder-text');
-        if (column.nodes.size === 0) {
-            if (!existing) {
-                const placeholder = document.createElement('div');
-                placeholder.className = 'placeholder-text';
-                placeholder.textContent = 'En attente...';
-                column.el.appendChild(placeholder);
+    // --- Textes d'attente --------------------------------------------------------------------
+    function synchroniserTexteAttente(type) {
+        const colonne = colonnes[type];
+        const existant = colonne.el.querySelector('.placeholder-text');
+        if (colonne.noeuds.size === 0) {
+            if (!existant) {
+                const attente = document.createElement('div');
+                attente.className = 'placeholder-text';
+                attente.textContent = 'En attente...';
+                colonne.el.appendChild(attente);
             }
-        } else if (existing) {
-            existing.remove();
+        } else if (existant) {
+            existant.remove();
         }
     }
 
-    // --- Nodes -------------------------------------------------------------------------------
+    // --- Nœuds -------------------------------------------------------------------------------
     /**
-     * Ensure a node exists in its column and return its element.
-     * Nodes are keyed in a Map (not looked up by DOM id) so that names containing characters that
-     * are awkward in selectors are handled, and so eviction is O(1).
+     * Garantit qu'un nœud existe dans sa colonne et renvoie son élément.
+     * Les nœuds sont indexés dans une Map (et non retrouvés par identifiant DOM) : les noms
+     * contenant des caractères délicats pour un sélecteur sont ainsi gérés, et l'éviction est
+     * en O(1).
      */
-    function touchNode(name, type) {
-        if (typeof name !== 'string' || name === '') return null;
-        const column = columns[type];
-        if (!column) return null;
+    function toucherNoeud(nom, type) {
+        if (typeof nom !== 'string' || nom === '') return null;
+        const colonne = colonnes[type];
+        if (!colonne) return null;
 
-        let el = column.nodes.get(name);
+        let el = colonne.noeuds.get(nom);
         if (el) {
-            // Re-insert to move the entry to the most-recently-used end of the Map.
-            column.nodes.delete(name);
-            column.nodes.set(name, el);
+            // Réinsertion pour déplacer l'entrée à l'extrémité « la plus récemment utilisée ».
+            colonne.noeuds.delete(nom);
+            colonne.noeuds.set(nom, el);
             return el;
         }
 
         el = document.createElement('div');
         el.className = 'node';
-        el.textContent = name;
-        el.title = name;
-        column.el.appendChild(el);
-        column.nodes.set(name, el);
+        el.textContent = nom;
+        el.title = nom;
+        colonne.el.appendChild(el);
+        colonne.noeuds.set(nom, el);
 
-        // Evict the least recently active node once the column is full.
-        while (column.nodes.size > MAX_NODES_PER_COLUMN) {
-            const oldestKey = column.nodes.keys().next().value;
-            const oldest = column.nodes.get(oldestKey);
-            column.nodes.delete(oldestKey);
-            if (oldest) oldest.remove();
+        // Évince le nœud le moins récemment actif dès que la colonne est pleine.
+        while (colonne.noeuds.size > MAX_NOEUDS_PAR_COLONNE) {
+            const cleLaPlusAncienne = colonne.noeuds.keys().next().value;
+            const ancien = colonne.noeuds.get(cleLaPlusAncienne);
+            colonne.noeuds.delete(cleLaPlusAncienne);
+            if (ancien) ancien.remove();
         }
 
-        syncPlaceholder(type);
+        synchroniserTexteAttente(type);
         return el;
     }
 
-    function removeNode(name, type) {
-        const column = columns[type];
-        if (!column) return;
-        const el = column.nodes.get(name);
+    function retirerNoeud(nom, type) {
+        const colonne = colonnes[type];
+        if (!colonne) return;
+        const el = colonne.noeuds.get(nom);
         if (!el) return;
-        column.nodes.delete(name);
+        colonne.noeuds.delete(nom);
         el.remove();
-        syncPlaceholder(type);
+        synchroniserTexteAttente(type);
     }
 
-    function pulse(el) {
+    function pulser(el) {
         if (!el) return;
         el.classList.remove('active');
-        // Force a reflow so the animation restarts when the same node fires twice in a row.
+        // Force un recalcul de mise en page pour que l'animation reparte quand le même nœud est
+        // sollicité deux fois de suite.
         void el.offsetWidth;
         el.classList.add('active');
     }
 
-    // --- Arrows ------------------------------------------------------------------------------
-    function drawArrow(startEl, endEl, arrowType) {
-        if (!startEl || !endEl) return;
-        if (liveArrows >= MAX_LIVE_ARROWS) return;
+    // --- Flèches -----------------------------------------------------------------------------
+    function dessinerFleche(elDepart, elArrivee, typeFleche) {
+        if (!elDepart || !elArrivee) return;
+        if (flechesVivantes >= MAX_FLECHES_VIVANTES) return;
 
-        const mapRect = svg.getBoundingClientRect();
-        const startRect = startEl.getBoundingClientRect();
-        const endRect = endEl.getBoundingClientRect();
+        const rectCarte = svg.getBoundingClientRect();
+        const rectDepart = elDepart.getBoundingClientRect();
+        const rectArrivee = elArrivee.getBoundingClientRect();
 
-        // Skip arrows whose endpoints have scrolled out of the visible map area; drawing them
-        // produces stray lines pinned to the container edges.
-        if (startRect.bottom < mapRect.top || startRect.top > mapRect.bottom) return;
-        if (endRect.bottom < mapRect.top || endRect.top > mapRect.bottom) return;
+        // On ignore les flèches dont les extrémités ont défilé hors de la zone visible : les
+        // tracer produit des traits parasites collés aux bords du conteneur.
+        if (rectDepart.bottom < rectCarte.top || rectDepart.top > rectCarte.bottom) return;
+        if (rectArrivee.bottom < rectCarte.top || rectArrivee.top > rectCarte.bottom) return;
 
-        const line = document.createElementNS(SVG_NS, 'line');
-        line.setAttribute('x1', String(startRect.right - mapRect.left));
-        line.setAttribute('y1', String(startRect.top + startRect.height / 2 - mapRect.top));
-        line.setAttribute('x2', String(endRect.left - mapRect.left));
-        line.setAttribute('y2', String(endRect.top + endRect.height / 2 - mapRect.top));
-        line.setAttribute('class', `message-arrow ${arrowType}`);
-        line.setAttribute('marker-end', `url(#arrowhead-${arrowType})`);
+        const ligne = document.createElementNS(NS_SVG, 'line');
+        ligne.setAttribute('x1', String(rectDepart.right - rectCarte.left));
+        ligne.setAttribute('y1', String(rectDepart.top + rectDepart.height / 2 - rectCarte.top));
+        ligne.setAttribute('x2', String(rectArrivee.left - rectCarte.left));
+        ligne.setAttribute('y2', String(rectArrivee.top + rectArrivee.height / 2 - rectCarte.top));
+        ligne.setAttribute('class', `message-arrow ${typeFleche}`);
+        ligne.setAttribute('marker-end', `url(#arrowhead-${typeFleche})`);
 
-        svg.appendChild(line);
-        liveArrows++;
+        svg.appendChild(ligne);
+        flechesVivantes++;
 
-        // `line.remove()` is a no-op if the node is already detached, unlike svg.removeChild(line)
-        // which throws NotFoundError.
+        // `ligne.remove()` ne fait rien si le nœud est déjà détaché, contrairement à
+        // `svg.removeChild(ligne)` qui lève une NotFoundError.
         setTimeout(() => {
-            line.remove();
-            liveArrows--;
+            ligne.remove();
+            flechesVivantes--;
         }, 1000);
     }
 
-    // --- Arrowhead markers -------------------------------------------------------------------
-    function buildMarkers() {
-        const defs = document.createElementNS(SVG_NS, 'defs');
-        const markers = [
-            {id: 'arrowhead-publish', fill: '#22c55e'},
-            {id: 'arrowhead-consume', fill: '#ffab40'},
-            {id: 'arrowhead-consumed', fill: '#ef4444'}
+    // --- Pointes de flèches ------------------------------------------------------------------
+    function construireMarqueurs() {
+        const defs = document.createElementNS(NS_SVG, 'defs');
+        const marqueurs = [
+            {id: 'arrowhead-publish', remplissage: '#22c55e'},
+            {id: 'arrowhead-consume', remplissage: '#ffab40'},
+            {id: 'arrowhead-consumed', remplissage: '#ef4444'}
         ];
 
-        for (const {id, fill} of markers) {
-            const marker = document.createElementNS(SVG_NS, 'marker');
-            marker.setAttribute('id', id);
-            marker.setAttribute('viewBox', '0 0 10 10');
-            marker.setAttribute('refX', '8');
-            marker.setAttribute('refY', '5');
-            marker.setAttribute('markerWidth', '6');
-            marker.setAttribute('markerHeight', '6');
-            marker.setAttribute('orient', 'auto-start-reverse');
-            const path = document.createElementNS(SVG_NS, 'path');
-            path.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
-            path.setAttribute('fill', fill);
-            marker.appendChild(path);
-            defs.appendChild(marker);
+        for (const {id, remplissage} of marqueurs) {
+            const marqueur = document.createElementNS(NS_SVG, 'marker');
+            marqueur.setAttribute('id', id);
+            marqueur.setAttribute('viewBox', '0 0 10 10');
+            marqueur.setAttribute('refX', '8');
+            marqueur.setAttribute('refY', '5');
+            marqueur.setAttribute('markerWidth', '6');
+            marqueur.setAttribute('markerHeight', '6');
+            marqueur.setAttribute('orient', 'auto-start-reverse');
+            const chemin = document.createElementNS(NS_SVG, 'path');
+            chemin.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+            chemin.setAttribute('fill', remplissage);
+            marqueur.appendChild(chemin);
+            defs.appendChild(marqueur);
         }
         svg.appendChild(defs);
     }
 
-    // --- Initial state -----------------------------------------------------------------------
-    async function initializeActivityMap() {
+    // --- État initial ------------------------------------------------------------------------
+    async function initialiserCarte() {
         try {
-            const state = await fetchJson('/graph/state');
-            // Defensive: a partial or errored response must not take the page down.
-            (state.producers || []).forEach(p => touchNode(p, 'producer'));
-            (state.topics || []).forEach(t => touchNode(t, 'topic'));
-            (state.consumers || []).forEach(c => touchNode(c, 'consumer'));
-        } catch (error) {
-            console.error('Failed to initialize activity map:', error);
+            const etat = await fetchJson('/graph/state');
+            // Défensif : une réponse partielle ou en erreur ne doit pas mettre la page à terre.
+            (etat.producers || []).forEach(p => toucherNoeud(p, 'producer'));
+            (etat.topics || []).forEach(t => toucherNoeud(t, 'topic'));
+            (etat.consumers || []).forEach(c => toucherNoeud(c, 'consumer'));
+        } catch (erreur) {
+            console.error("Échec de l'initialisation de la carte d'activité :", erreur);
             setConnectionState('disconnected', 'état indisponible');
         }
     }
 
-    // --- Wiring ------------------------------------------------------------------------------
-    buildMarkers();
-    for (const type of Object.keys(columns)) syncPlaceholder(type);
+    // --- Branchements ------------------------------------------------------------------------
+    construireMarqueurs();
+    for (const type of Object.keys(colonnes)) synchroniserTexteAttente(type);
 
-    const socket = trackConnection(io(), 'activity');
+    const socket = trackConnection(io(), 'activité');
 
     socket.on('connect', () => {
-        // Re-sync on every (re)connect: anything that happened while disconnected was missed.
-        initializeActivityMap();
+        // Resynchronisation à chaque (re)connexion : tout ce qui s'est produit pendant la coupure
+        // a été manqué.
+        initialiserCarte();
     });
 
-    socket.on('new_message', (data) => {
-        const producer = touchNode(data.producer, 'producer');
-        const topic = touchNode(data.topic, 'topic');
-        pulse(topic);
-        drawArrow(producer, topic, 'publish');
+    socket.on('new_message', (donnees) => {
+        const producteur = toucherNoeud(donnees.producer, 'producer');
+        const topic = toucherNoeud(donnees.topic, 'topic');
+        pulser(topic);
+        dessinerFleche(producteur, topic, 'publish');
     });
 
-    socket.on('new_consumption', (data) => {
-        const topic = touchNode(data.topic, 'topic');
-        const consumer = touchNode(data.consumer, 'consumer');
-        pulse(consumer);
-        drawArrow(topic, consumer, 'consume');
+    socket.on('new_consumption', (donnees) => {
+        const topic = toucherNoeud(donnees.topic, 'topic');
+        const consommateur = toucherNoeud(donnees.consumer, 'consumer');
+        pulser(consommateur);
+        dessinerFleche(topic, consommateur, 'consume');
     });
 
-    socket.on('consumed', (data) => {
-        const topic = touchNode(data.topic, 'topic');
-        const consumer = touchNode(data.consumer, 'consumer');
-        pulse(consumer);
-        drawArrow(topic, consumer, 'consumed');
+    socket.on('consumed', (donnees) => {
+        const topic = toucherNoeud(donnees.topic, 'topic');
+        const consommateur = toucherNoeud(donnees.consumer, 'consumer');
+        pulser(consommateur);
+        dessinerFleche(topic, consommateur, 'consumed');
     });
 
-    socket.on('new_client', (data) => {
-        touchNode(data.consumer, 'consumer');
-        touchNode(data.topic, 'topic');
+    socket.on('new_client', (donnees) => {
+        toucherNoeud(donnees.consumer, 'consumer');
+        toucherNoeud(donnees.topic, 'topic');
     });
 
-    // Drop consumers that go away, so the map reflects who is actually connected.
-    socket.on('client_disconnected', (data) => {
-        removeNode(data.consumer, 'consumer');
+    // Retire les consommateurs qui s'en vont, pour que la carte reflète qui est réellement
+    // connecté.
+    socket.on('client_disconnected', (donnees) => {
+        retirerNoeud(donnees.consumer, 'consumer');
     });
 });

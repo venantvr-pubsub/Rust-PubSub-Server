@@ -4,10 +4,10 @@ document.addEventListener("DOMContentLoaded", () => {
         coalesce, trackConnection, fetchJson
     } = window.DashboardUtils;
 
-    // Generate a UUID v4 for message IDs.
-    // crypto.randomUUID is available on every browser that supports the rest of this page; the
-    // Math.random fallback exists only for non-secure-context origins (plain http on a LAN IP),
-    // where crypto.randomUUID is not exposed.
+    // Génère un UUID v4 pour les identifiants de message.
+    // `crypto.randomUUID` est disponible sur tous les navigateurs capables d'afficher le reste de
+    // cette page ; le repli sur Math.random n'existe que pour les origines hors contexte sécurisé
+    // (http simple sur une IP de réseau local), où `crypto.randomUUID` n'est pas exposé.
     function uuidv4() {
         if (window.crypto && typeof window.crypto.randomUUID === 'function') {
             return window.crypto.randomUUID();
@@ -19,7 +19,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // Base message class for structuring messages.
+    // Classe de base pour structurer les messages.
     class BaseMessage {
         constructor(producer, payload, message_id = null) {
             this.message_id = message_id || uuidv4();
@@ -37,34 +37,34 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // Specific business class for text messages.
+    // Classe métier spécifique aux messages texte.
     class TextMessage extends BaseMessage {
         constructor(text, producer, message_id) {
             super(producer, {text: text}, message_id);
         }
     }
 
-    // --- Table definitions -------------------------------------------------------------------
-    // One entry per tab. `cells` are plain accessors; DashboardUtils.renderRows writes them with
-    // textContent, so nothing here can inject markup.
-    const TABLES = {
+    // --- Définition des tableaux -------------------------------------------------------------
+    // Une entrée par onglet. Les `cellules` sont de simples accesseurs ; renderRows les écrit via
+    // textContent, donc rien ici ne peut injecter de balisage.
+    const TABLEAUX = {
         clients: {
-            target: '#clients',
+            cible: '#clients',
             tbody: document.querySelector('#clientsTable tbody'),
             url: '/clients',
-            empty: 'Aucun client connecté',
-            cells: [
+            vide: 'Aucun client connecté',
+            cellules: [
                 c => c.consumer,
                 c => c.topic,
                 c => formatTimestamp(c.connected_at)
             ]
         },
         messages: {
-            target: '#messages',
+            cible: '#messages',
             tbody: document.querySelector('#messagesTable tbody'),
             url: '/messages',
-            empty: 'Aucun message publié',
-            cells: [
+            vide: 'Aucun message publié',
+            cellules: [
                 m => m.producer,
                 m => m.topic,
                 m => m.message_id,
@@ -73,11 +73,11 @@ document.addEventListener("DOMContentLoaded", () => {
             ]
         },
         consumptions: {
-            target: '#consumptions',
+            cible: '#consumptions',
             tbody: document.querySelector('#consTable tbody'),
             url: '/consumptions',
-            empty: 'Aucune consommation enregistrée',
-            cells: [
+            vide: 'Aucune consommation enregistrée',
+            cellules: [
                 c => c.consumer,
                 c => c.topic,
                 c => c.message_id,
@@ -87,176 +87,181 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
-    // The tab that is currently visible. Only that table is fetched on an incoming event; the
-    // others are marked stale and refreshed when the user switches to them. Previously all three
-    // tables were re-fetched on every single event, including the two nobody was looking at.
-    let activeTable = 'clients';
-    const stale = new Set();
+    // Onglet actuellement visible. Seul ce tableau est rechargé lorsqu'un événement arrive ; les
+    // autres sont marqués périmés et rechargés au changement d'onglet. Auparavant, les trois
+    // tableaux étaient rechargés à chaque événement, y compris les deux que personne ne regardait.
+    let tableauActif = 'clients';
+    const perimes = new Set();
 
-    async function load(key) {
-        const table = TABLES[key];
-        if (!table || !table.tbody) return;
+    async function charger(cle) {
+        const tableau = TABLEAUX[cle];
+        if (!tableau || !tableau.tbody) return;
         try {
-            const rows = await fetchJson(table.url);
-            // Only clear the body once the data has arrived. The old code emptied it first, which
-            // made every refresh flash "En attente..." even though data was already on screen.
-            renderRows(table.tbody, rows, table.cells, table.empty);
-            stale.delete(key);
-        } catch (error) {
-            console.error(`Error fetching ${table.url}:`, error);
-            renderNotice(table.tbody, table.cells.length, 'Erreur de chargement', 'text-danger');
+            const lignes = await fetchJson(tableau.url);
+            // On ne vide le corps du tableau qu'une fois les données arrivées. L'ancien code le
+            // vidait d'abord, ce qui faisait clignoter « En attente... » à chaque rafraîchissement
+            // alors que des données étaient déjà affichées.
+            renderRows(tableau.tbody, lignes, tableau.cellules, tableau.vide);
+            perimes.delete(cle);
+        } catch (erreur) {
+            console.error(`Erreur lors de la récupération de ${tableau.url} :`, erreur);
+            renderNotice(tableau.tbody, tableau.cellules.length, 'Erreur de chargement', 'text-danger');
         }
     }
 
-    // One coalescing refresher per table: an event burst collapses into a single fetch.
-    const refresh = {};
-    for (const key of Object.keys(TABLES)) {
-        refresh[key] = coalesce(() => load(key), 250);
+    // Un regroupeur par tableau : une rafale d'événements se réduit à un seul chargement.
+    const rafraichir = {};
+    for (const cle of Object.keys(TABLEAUX)) {
+        rafraichir[cle] = coalesce(() => charger(cle), 250);
     }
 
-    function invalidate(key) {
-        if (key === activeTable) {
-            refresh[key]();
+    function invalider(cle) {
+        if (cle === tableauActif) {
+            rafraichir[cle]();
         } else {
-            stale.add(key);
+            perimes.add(cle);
         }
     }
 
-    // --- Live event stream -------------------------------------------------------------------
-    // This socket exists purely to observe the broker. It is created once, on page load, so the
-    // tables are populated and stay live even if the user never touches "Connect & Subscribe".
-    // Previously every socket handler lived inside the Connect click handler, so a freshly opened
-    // Control Panel showed three empty tables until you clicked the button.
-    const monitorSocket = trackConnection(io(), 'monitor');
+    // --- Flux d'événements temps réel --------------------------------------------------------
+    // Ce socket sert uniquement à observer le broker. Il est créé une seule fois, au chargement de
+    // la page, afin que les tableaux soient remplis et restent à jour même si l'utilisateur ne
+    // touche jamais au bouton « Connect & Subscribe ». Auparavant, tous les gestionnaires vivaient
+    // à l'intérieur du gestionnaire de clic de ce bouton : un Control Panel fraîchement ouvert
+    // affichait donc trois tableaux vides tant qu'on n'avait pas cliqué.
+    const socketMoniteur = trackConnection(io(), 'moniteur');
 
-    monitorSocket.on('connect', () => {
-        // Refresh on (re)connect: events that fired while we were disconnected were missed.
-        for (const key of Object.keys(TABLES)) {
-            if (key === activeTable) refresh[key].now();
-            else stale.add(key);
+    socketMoniteur.on('connect', () => {
+        // Rechargement à la (re)connexion : les événements survenus pendant la coupure sont perdus.
+        for (const cle of Object.keys(TABLEAUX)) {
+            if (cle === tableauActif) rafraichir[cle].now();
+            else perimes.add(cle);
         }
     });
 
-    monitorSocket.on('new_message', () => invalidate('messages'));
-    monitorSocket.on('new_client', () => invalidate('clients'));
-    monitorSocket.on('client_disconnected', () => invalidate('clients'));
-    monitorSocket.on('new_consumption', () => invalidate('consumptions'));
-    monitorSocket.on('consumed', () => invalidate('consumptions'));
+    socketMoniteur.on('new_message', () => invalider('messages'));
+    socketMoniteur.on('new_client', () => invalider('clients'));
+    socketMoniteur.on('client_disconnected', () => invalider('clients'));
+    socketMoniteur.on('new_consumption', () => invalider('consumptions'));
+    socketMoniteur.on('consumed', () => invalider('consumptions'));
 
-    // --- Test consumer -----------------------------------------------------------------------
-    // A second, independent connection used to exercise the broker from the browser.
-    // It must NOT reuse the monitor socket: io() with the same URL returns the cached manager, so
-    // repeatedly calling io() stacked a new set of listeners on one socket and every event ended
-    // up handled N times. forceNew gives this button its own connection, which we tear down
-    // explicitly before opening another.
-    let consumerSocket = null;
-    const connectBtn = document.getElementById("connectBtn");
+    // --- Consommateur de test ----------------------------------------------------------------
+    // Une seconde connexion, indépendante, pour éprouver le broker depuis le navigateur.
+    // Elle ne doit PAS réutiliser le socket du moniteur : `io()` avec la même URL renvoie le
+    // gestionnaire mis en cache, si bien qu'appeler `io()` à répétition empilait un nouveau jeu de
+    // gestionnaires sur un seul et même socket et que chaque événement finissait traité N fois.
+    // `forceNew` donne à ce bouton sa propre connexion, que l'on démonte explicitement avant d'en
+    // ouvrir une autre.
+    let socketConsommateur = null;
+    const boutonConnexion = document.getElementById("connectBtn");
 
-    connectBtn.addEventListener("click", () => {
+    boutonConnexion.addEventListener("click", () => {
         const consumer = document.getElementById("consumer").value.trim();
         const topics = document.getElementById("topics").value
             .split(",").map(s => s.trim()).filter(s => s);
 
         if (!consumer || topics.length === 0) {
-            alert("Please enter a consumer name and at least one topic.");
+            alert("Veuillez saisir un nom de consommateur et au moins un topic.");
             return;
         }
 
-        if (consumerSocket) {
-            consumerSocket.removeAllListeners();
-            consumerSocket.disconnect();
-            consumerSocket = null;
+        if (socketConsommateur) {
+            socketConsommateur.removeAllListeners();
+            socketConsommateur.disconnect();
+            socketConsommateur = null;
         }
 
-        console.log(`Connecting as ${consumer} to topics: ${topics.join(', ')}`);
+        console.log(`Connexion en tant que ${consumer} aux topics : ${topics.join(', ')}`);
 
-        consumerSocket = io({
+        socketConsommateur = io({
             forceNew: true,
             reconnection: true,
             reconnectionAttempts: Infinity,
             reconnectionDelay: 2000
         });
 
-        consumerSocket.on("connect", () => {
-            console.log(`Test consumer connected, subscribing to: ${topics.join(', ')}`);
-            consumerSocket.emit("subscribe", {consumer, topics});
+        socketConsommateur.on("connect", () => {
+            console.log(`Consommateur de test connecté, abonnement à : ${topics.join(', ')}`);
+            socketConsommateur.emit("subscribe", {consumer, topics});
         });
 
-        consumerSocket.on("message", (data) => {
-            // Received by this browser as a subscriber. The tables are fed by the monitor socket,
-            // so there is nothing to render here.
-            console.log('Message received:', data);
+        socketConsommateur.on("message", (donnees) => {
+            // Reçu par ce navigateur en tant qu'abonné. Les tableaux sont alimentés par le socket
+            // moniteur : il n'y a donc rien à afficher ici.
+            console.log('Message reçu :', donnees);
         });
 
-        consumerSocket.on("disconnect", (reason) => {
-            console.log(`Test consumer disconnected: ${reason}`);
+        socketConsommateur.on("disconnect", (raison) => {
+            console.log(`Consommateur de test déconnecté : ${raison}`);
         });
 
-        consumerSocket.on("connect_error", (error) => {
-            console.error('Test consumer connection error:', error);
+        socketConsommateur.on("connect_error", (erreur) => {
+            console.error('Erreur de connexion du consommateur de test :', erreur);
         });
     });
 
-    // --- Publishing --------------------------------------------------------------------------
-    const pubBtn = document.getElementById("pubBtn");
+    // --- Publication -------------------------------------------------------------------------
+    const boutonPublier = document.getElementById("pubBtn");
 
-    pubBtn.addEventListener("click", async () => {
+    boutonPublier.addEventListener("click", async () => {
         const topic = document.getElementById("pubTopic").value.trim();
-        const messageText = document.getElementById("pubMessage").value;
+        const texteMessage = document.getElementById("pubMessage").value;
         const producer = document.getElementById("pubProducer").value.trim() || "frontend_publisher";
 
-        if (!topic || !messageText) {
-            alert("Please enter a topic and a message to publish.");
+        if (!topic || !texteMessage) {
+            alert("Veuillez saisir un topic et un message à publier.");
             return;
         }
 
-        const payload = new TextMessage(messageText, producer, uuidv4()).toPayload(topic);
+        const payload = new TextMessage(texteMessage, producer, uuidv4()).toPayload(topic);
 
-        pubBtn.disabled = true;
+        boutonPublier.disabled = true;
         try {
-            const response = await fetch("/publish", {
+            const reponse = await fetch("/publish", {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify(payload)
             });
 
-            if (!response.ok) {
-                // The server may answer with a JSON body or with nothing at all. Blindly calling
-                // response.json() on an empty body throws a SyntaxError, which used to surface to
-                // the user as "Unexpected end of JSON input" instead of the actual failure.
-                let detail = `HTTP ${response.status}`;
+            if (!reponse.ok) {
+                // Le serveur peut répondre avec un corps JSON, ou sans corps du tout. Appeler
+                // aveuglément `response.json()` sur un corps vide lève une SyntaxError, qui
+                // remontait à l'utilisateur sous la forme « Unexpected end of JSON input » au lieu
+                // de la véritable cause de l'échec.
+                let detail = `HTTP ${reponse.status}`;
                 try {
-                    const body = await response.json();
-                    if (body && body.message) detail = body.message;
-                } catch (_) { /* no JSON body - keep the status line */ }
+                    const corps = await reponse.json();
+                    if (corps && corps.message) detail = corps.message;
+                } catch (_) { /* pas de corps JSON — on garde la ligne de statut */ }
                 throw new Error(detail);
             }
 
             document.getElementById("pubMessage").value = "";
-            // The broadcast event will also trigger a refresh, but firing one here means the row
-            // shows up even if this browser is not receiving events for some reason.
-            invalidate('messages');
-        } catch (error) {
-            console.error('Publish error:', error);
-            alert(`Failed to publish message: ${error.message}`);
+            // L'événement de diffusion provoquera aussi un rafraîchissement, mais en déclencher un
+            // ici garantit que la ligne apparaît même si ce navigateur ne reçoit pas les
+            // événements pour une raison quelconque.
+            invalider('messages');
+        } catch (erreur) {
+            console.error('Erreur de publication :', erreur);
+            alert(`Échec de la publication du message : ${erreur.message}`);
         } finally {
-            pubBtn.disabled = false;
+            boutonPublier.disabled = false;
         }
     });
 
-    // --- Tabs --------------------------------------------------------------------------------
-    document.getElementById('pubSubTabs').addEventListener('shown.bs.tab', (event) => {
-        const target = event.target.getAttribute('data-bs-target');
-        const entry = Object.entries(TABLES).find(([, table]) => table.target === target);
-        if (!entry) return;
-        const [key] = entry;
-        activeTable = key;
-        if (stale.has(key)) refresh[key].now();
+    // --- Onglets -----------------------------------------------------------------------------
+    document.getElementById('pubSubTabs').addEventListener('shown.bs.tab', (evenement) => {
+        const cible = evenement.target.getAttribute('data-bs-target');
+        const entree = Object.entries(TABLEAUX).find(([, tableau]) => tableau.cible === cible);
+        if (!entree) return;
+        const [cle] = entree;
+        tableauActif = cle;
+        if (perimes.has(cle)) rafraichir[cle].now();
     });
 
-    // Initial load: the visible tab immediately, the others marked stale.
-    for (const key of Object.keys(TABLES)) {
-        if (key === activeTable) refresh[key].now();
-        else stale.add(key);
+    // Chargement initial : l'onglet visible immédiatement, les autres marqués périmés.
+    for (const cle of Object.keys(TABLEAUX)) {
+        if (cle === tableauActif) rafraichir[cle].now();
+        else perimes.add(cle);
     }
 });

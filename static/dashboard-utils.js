@@ -1,69 +1,72 @@
 /**
  * dashboard-utils.js
- * Small helpers shared by the dashboard pages: safe table rendering, refresh coalescing,
- * timestamp formatting and the navbar connection indicator.
+ * Petits utilitaires partagés par les pages du dashboard : rendu sûr des tableaux, regroupement
+ * des rafraîchissements, formatage des horodatages et indicateur de connexion de la barre de
+ * navigation.
  */
 (function (global) {
     'use strict';
 
     /**
-     * Format a Unix timestamp expressed in (fractional) seconds.
-     * The server sends f64 seconds; Date expects milliseconds.
+     * Formate un horodatage Unix exprimé en secondes (éventuellement fractionnaires).
+     * Le serveur envoie des f64 en secondes ; `Date` attend des millisecondes.
      */
-    function formatTimestamp(unixSeconds) {
-        if (typeof unixSeconds !== 'number' || !isFinite(unixSeconds)) return '';
-        return new Date(unixSeconds * 1000).toLocaleString();
+    function formatTimestamp(secondesUnix) {
+        if (typeof secondesUnix !== 'number' || !isFinite(secondesUnix)) return '';
+        return new Date(secondesUnix * 1000).toLocaleString();
     }
 
     /**
-     * Render a message payload for display without ever interpreting it as markup.
-     * Long payloads are truncated so a single fat message cannot blow up the table layout.
+     * Prépare une charge utile pour l'affichage, sans jamais l'interpréter comme du balisage.
+     * Les charges trop longues sont tronquées : un seul message volumineux ne doit pas faire
+     * exploser la mise en page du tableau.
      */
-    function formatPayload(value, maxLength = 300) {
-        let text;
-        if (typeof value === 'string') {
-            text = value;
+    function formatPayload(valeur, longueurMax = 300) {
+        let texte;
+        if (typeof valeur === 'string') {
+            texte = valeur;
         } else {
             try {
-                text = JSON.stringify(value);
+                texte = JSON.stringify(valeur);
             } catch (_) {
-                text = String(value);
+                texte = String(valeur);
             }
         }
-        if (text === undefined) text = '';
-        return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+        if (texte === undefined) texte = '';
+        return texte.length > longueurMax ? `${texte.slice(0, longueurMax)}…` : texte;
     }
 
     /**
-     * Replace the contents of a <tbody> with one row per item.
+     * Remplace le contenu d'un <tbody> par une ligne par élément.
      *
-     * Cell values are written with textContent, never innerHTML: message payloads, topic names and
-     * consumer names are attacker-controlled (anyone who can publish can choose them), so string
-     * interpolation into innerHTML here is a stored-XSS sink.
+     * Les valeurs des cellules sont écrites via textContent, jamais via innerHTML : les charges
+     * utiles, les noms de topics et les noms de consommateurs sont contrôlés par l'extérieur
+     * (quiconque peut publier choisit ces valeurs). Les interpoler dans innerHTML constituait donc
+     * une faille XSS stockée.
      *
-     * @param {HTMLElement} tbody      target table body
-     * @param {Array} items            rows to display
-     * @param {Array<Function>} cells  one accessor per column, returning the cell text
-     * @param {string} emptyMessage    shown when `items` is empty
+     * @param {HTMLElement} tbody        corps de tableau ciblé
+     * @param {Array} elements           lignes à afficher
+     * @param {Array<Function>} cellules un accesseur par colonne, renvoyant le texte de la cellule
+     * @param {string} messageVide       affiché lorsque `elements` est vide
      */
-    function renderRows(tbody, items, cells, emptyMessage) {
+    function renderRows(tbody, elements, cellules, messageVide) {
         if (!tbody) return;
         const fragment = document.createDocumentFragment();
 
-        if (!items || items.length === 0) {
+        if (!elements || elements.length === 0) {
             const tr = document.createElement('tr');
             const td = document.createElement('td');
-            td.colSpan = cells.length;
+            td.colSpan = cellules.length;
             td.className = 'text-center text-muted';
-            td.textContent = emptyMessage;
+            td.textContent = messageVide;
             tr.appendChild(td);
             fragment.appendChild(tr);
         } else {
-            for (const item of items) {
+            for (const element of elements) {
                 const tr = document.createElement('tr');
-                for (const cell of cells) {
+                for (const cellule of cellules) {
                     const td = document.createElement('td');
-                    td.textContent = cell(item);
+                    td.textContent = cellule(element);
                     tr.appendChild(td);
                 }
                 fragment.appendChild(tr);
@@ -73,105 +76,106 @@
         tbody.replaceChildren(fragment);
     }
 
-    /** Render a single full-width status row (loading / error). */
-    function renderNotice(tbody, columnCount, message, variant = 'text-muted') {
+    /** Affiche une unique ligne d'état occupant toute la largeur (chargement / erreur). */
+    function renderNotice(tbody, nombreColonnes, message, variante = 'text-muted') {
         if (!tbody) return;
         const tr = document.createElement('tr');
         const td = document.createElement('td');
-        td.colSpan = columnCount;
-        td.className = `text-center ${variant}`;
+        td.colSpan = nombreColonnes;
+        td.className = `text-center ${variante}`;
         td.textContent = message;
         tr.replaceChildren(td);
         tbody.replaceChildren(tr);
     }
 
     /**
-     * Wrap an async function so that:
-     *  - bursts of calls collapse into a single run (trailing edge, `wait` ms);
-     *  - only one run is ever in flight;
-     *  - a call arriving during a run schedules exactly one follow-up run.
+     * Enveloppe une fonction asynchrone de sorte que :
+     *  - les rafales d'appels se réduisent à une seule exécution (front descendant, `attente` ms) ;
+     *  - une seule exécution soit en vol à la fois ;
+     *  - un appel arrivant pendant une exécution planifie exactement une exécution de rattrapage.
      *
-     * The dashboard refreshes on every `new_message` event. Without this, a producer doing 1k
-     * msg/s triggers 1k full table fetches per second and the browser spends all its time
-     * re-rendering stale snapshots.
+     * Le dashboard se rafraîchit à chaque événement `new_message`. Sans cela, un producteur à
+     * 1 000 msg/s déclenchait 1 000 rechargements complets de tableau par seconde et le navigateur
+     * passait son temps à réafficher des instantanés déjà périmés.
      */
-    function coalesce(fn, wait = 250) {
-        let timer = null;
-        let running = false;
-        let pending = false;
+    function coalesce(fn, attente = 250) {
+        let minuteur = null;
+        let enCours = false;
+        let enAttente = false;
 
-        async function run() {
-            if (running) {
-                pending = true;
+        async function executer() {
+            if (enCours) {
+                enAttente = true;
                 return;
             }
-            running = true;
+            enCours = true;
             try {
                 await fn();
-            } catch (error) {
-                console.error('Refresh failed:', error);
+            } catch (erreur) {
+                console.error('Échec du rafraîchissement :', erreur);
             } finally {
-                running = false;
-                if (pending) {
-                    pending = false;
-                    schedule();
+                enCours = false;
+                if (enAttente) {
+                    enAttente = false;
+                    planifier();
                 }
             }
         }
 
-        function schedule() {
-            if (timer !== null) return;
-            timer = setTimeout(() => {
-                timer = null;
-                run();
-            }, wait);
+        function planifier() {
+            if (minuteur !== null) return;
+            minuteur = setTimeout(() => {
+                minuteur = null;
+                executer();
+            }, attente);
         }
 
-        schedule.now = run;
-        schedule.cancel = () => {
-            if (timer !== null) {
-                clearTimeout(timer);
-                timer = null;
+        planifier.now = executer;
+        planifier.cancel = () => {
+            if (minuteur !== null) {
+                clearTimeout(minuteur);
+                minuteur = null;
             }
         };
-        return schedule;
+        return planifier;
     }
 
     /**
-     * Drive the connection pill rendered by nav.js.
-     * @param {'connected'|'connecting'|'disconnected'} state
+     * Pilote la pastille de connexion produite par nav.js.
+     * @param {'connected'|'connecting'|'disconnected'} etat
      */
-    function setConnectionState(state, detail) {
-        const badge = document.getElementById('connectionStatus');
-        if (!badge) return;
-        const labels = {
+    function setConnectionState(etat, detail) {
+        const pastille = document.getElementById('connectionStatus');
+        if (!pastille) return;
+        const libelles = {
             connected: 'Connecté',
             connecting: 'Connexion…',
             disconnected: 'Déconnecté'
         };
-        badge.dataset.state = state;
-        badge.textContent = detail ? `${labels[state]} · ${detail}` : (labels[state] || state);
+        pastille.dataset.state = etat;
+        pastille.textContent = detail ? `${libelles[etat]} · ${detail}` : (libelles[etat] || etat);
     }
 
     /**
-     * Attach the standard connection lifecycle handlers to a socket.io socket.
-     * Returns the socket so it can be chained.
+     * Attache les gestionnaires standards du cycle de vie d'une connexion à un socket Socket.IO.
+     * Renvoie le socket pour permettre le chaînage.
      */
-    function trackConnection(socket, label) {
+    function trackConnection(socket, libelle) {
         setConnectionState('connecting');
-        socket.on('connect', () => setConnectionState('connected', label));
+        socket.on('connect', () => setConnectionState('connected', libelle));
         socket.on('disconnect', () => setConnectionState('disconnected'));
         socket.on('connect_error', () => setConnectionState('disconnected'));
         return socket;
     }
 
-    /** fetch() + JSON with an explicit status check, so a 4xx/5xx does not decode as data. */
+    /** fetch() + JSON avec contrôle explicite du statut, pour qu'une 4xx/5xx ne soit pas décodée
+     *  comme si c'étaient des données valides. */
     async function fetchJson(url) {
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`${url} responded ${response.status}`);
+        const reponse = await fetch(url);
+        if (!reponse.ok) {
+            throw new Error(`${url} a répondu ${reponse.status}`);
         }
-        return response.json();
+        return reponse.json();
     }
 
     global.DashboardUtils = {

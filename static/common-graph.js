@@ -1,39 +1,41 @@
 /**
  * common-graph.js
- * Generic logic for an interactive D3 graph fed by the broker's Socket.IO event stream.
- * Layout-specific behaviour (simulation, node placement, link drawing) comes from `config`.
+ * Logique générique d'un graphe D3 interactif alimenté par le flux d'événements Socket.IO du
+ * broker. Le comportement propre à chaque disposition (simulation, placement des nœuds, tracé des
+ * liens) provient de `config`.
  */
 function createGraph(config) {
     const {trackConnection, fetchJson, setConnectionState} = window.DashboardUtils;
 
     const svg = d3.select(config.svgSelector);
-    const svgNode = svg.node();
-    const radius = 20;
+    const noeudSvg = svg.node();
+    const rayon = 20;
 
-    // Cap the graph size. Every distinct name the broker ever mentions used to become a permanent
-    // node, so a long-running server ended up with an unreadable hairball that also pegged the CPU
-    // in the force simulation.
-    const MAX_NODES = config.maxNodes || 80;
+    // Plafonne la taille du graphe. Chaque nom distinct mentionné par le broker devenait un nœud
+    // permanent : sur un serveur de longue durée, on obtenait une pelote illisible qui saturait de
+    // surcroît le processeur dans la simulation de forces.
+    const MAX_NOEUDS = config.maxNodes || 80;
 
-    // Dimensions are re-read on resize. They used to be captured once at startup, so the layout
-    // stayed centred on the initial window size and drifted off-screen after any resize - and was
-    // computed as 0x0 entirely if the container had not been laid out yet.
-    let width = 0;
-    let height = 0;
+    // Les dimensions sont relues à chaque redimensionnement. Elles n'étaient auparavant mesurées
+    // qu'une fois au démarrage : la disposition restait centrée sur la taille initiale de la
+    // fenêtre et dérivait hors de l'écran au moindre redimensionnement — voire était calculée à
+    // 0 × 0 si le conteneur n'avait pas encore été mis en page.
+    let largeur = 0;
+    let hauteur = 0;
 
-    function measure() {
-        const rect = svgNode.getBoundingClientRect();
-        width = rect.width || svgNode.clientWidth || 800;
-        height = rect.height || svgNode.clientHeight || 600;
+    function mesurer() {
+        const rect = noeudSvg.getBoundingClientRect();
+        largeur = rect.width || noeudSvg.clientWidth || 800;
+        hauteur = rect.height || noeudSvg.clientHeight || 600;
     }
 
-    measure();
+    mesurer();
 
     const g = svg.append("g");
-    const linkGroup = g.append("g").attr("class", "links");
-    const nodeGroup = g.append("g").attr("class", "nodes");
+    const groupeLiens = g.append("g").attr("class", "links");
+    const groupeNoeuds = g.append("g").attr("class", "nodes");
 
-    // --- Arrow markers -----------------------------------------------------------------------
+    // --- Pointes de flèches ------------------------------------------------------------------
     svg.append("defs").selectAll("marker")
         .data(["publish", "consume", "consumed"])
         .enter().append("marker")
@@ -46,194 +48,201 @@ function createGraph(config) {
         .attr("orient", config.arrow.orient)
         .append("path")
         .attr("d", "M0,-5L10,0L0,5")
-        .style("fill", d => linkColor(d));
+        .style("fill", d => couleurLien(d));
 
-    function linkColor(type) {
+    function couleurLien(type) {
         if (type === 'publish') return '#28a745';
         if (type === 'consume') return '#ffab40';
         return '#dc3545';
     }
 
-    // --- Data --------------------------------------------------------------------------------
-    let nodes = [];
-    const nodeMap = new Map();
-    const simulation = config.createSimulation(width, height);
+    // --- Données -----------------------------------------------------------------------------
+    let noeuds = [];
+    const indexNoeuds = new Map();
+    const simulation = config.createSimulation(largeur, hauteur);
 
-    // Drag must be defined before updateGraph() can call it. It was previously declared with
-    // `const` further down the file, which worked only because of call ordering.
-    const drag = d3.drag()
-        .on("start", (event, d) => {
-            if (!event.active) simulation.alphaTarget(0.3).restart();
+    // Le glisser-déposer doit être défini avant que `mettreAJourGraphe()` puisse l'utiliser. Il
+    // était auparavant déclaré avec `const` plus bas dans le fichier, ce qui ne fonctionnait que
+    // grâce à l'ordre des appels.
+    const glisser = d3.drag()
+        .on("start", (evenement, d) => {
+            if (!evenement.active) simulation.alphaTarget(0.3).restart();
             d.fx = d.x;
             d.fy = d.y;
         })
-        .on("drag", (event, d) => {
-            d.fx = event.x;
-            d.fy = event.y;
+        .on("drag", (evenement, d) => {
+            d.fx = evenement.x;
+            d.fy = evenement.y;
         })
-        .on("end", (event) => {
-            if (!event.active) simulation.alphaTarget(0);
-            // Deliberately keep fx/fy: this layout pins every node, so clearing them here made a
-            // dragged node snap to the centre and never return to the ring.
+        .on("end", (evenement) => {
+            if (!evenement.active) simulation.alphaTarget(0);
+            // On conserve délibérément fx/fy : cette disposition épingle tous les nœuds, si bien
+            // que les effacer ici renvoyait le nœud déplacé au centre, sans jamais revenir sur
+            // l'anneau.
         });
 
     /**
-     * Insert or refresh a node. Returns true when the node set changed (i.e. a relayout is due).
+     * Insère ou rafraîchit un nœud. Renvoie true lorsque l'ensemble des nœuds a changé
+     * (c'est-à-dire qu'un repositionnement s'impose).
      */
-    function addOrUpdateNode(id, role) {
+    function ajouterOuMettreAJourNoeud(id, role) {
         if (typeof id !== 'string' || id === '') return false;
 
-        const existing = nodeMap.get(id);
-        if (existing) {
-            existing.lastSeen = performance.now();
-            if (!existing.roles.includes(role)) {
-                existing.roles.push(role);
+        const existant = indexNoeuds.get(id);
+        if (existant) {
+            existant.vuLe = performance.now();
+            if (!existant.roles.includes(role)) {
+                existant.roles.push(role);
                 return true;
             }
             return false;
         }
 
-        const node = {id, name: id, roles: [role], lastSeen: performance.now()};
-        nodes.push(node);
-        nodeMap.set(id, node);
+        const noeud = {id, name: id, roles: [role], vuLe: performance.now()};
+        noeuds.push(noeud);
+        indexNoeuds.set(id, noeud);
 
-        // Evict the least recently active nodes once we exceed the budget.
-        if (nodes.length > MAX_NODES) {
-            nodes.sort((a, b) => b.lastSeen - a.lastSeen);
-            for (const dropped of nodes.splice(MAX_NODES)) {
-                nodeMap.delete(dropped.id);
+        // Évince les nœuds les moins récemment actifs dès que le budget est dépassé.
+        if (noeuds.length > MAX_NOEUDS) {
+            noeuds.sort((a, b) => b.vuLe - a.vuLe);
+            for (const evince of noeuds.splice(MAX_NOEUDS)) {
+                indexNoeuds.delete(evince.id);
             }
         }
         return true;
     }
 
-    function drawTemporaryArrow(sourceId, targetId, type) {
-        const sourceNode = nodeMap.get(sourceId);
-        const targetNode = nodeMap.get(targetId);
-        if (!sourceNode || !targetNode) return;
+    function dessinerFlecheTemporaire(idSource, idCible, type) {
+        const noeudSource = indexNoeuds.get(idSource);
+        const noeudCible = indexNoeuds.get(idCible);
+        if (!noeudSource || !noeudCible) return;
 
-        // Blink the destination so a burst is visible even when the arrow is short.
-        const targetNodeElement = nodeGroup.selectAll('.node').filter(d => d.id === targetId);
-        if (!targetNodeElement.empty()) {
-            targetNodeElement.classed('blink', false);
-            // Force a reflow so the animation restarts on repeated hits.
-            void targetNodeElement.node().getBoundingClientRect();
-            targetNodeElement.classed('blink', true);
-            setTimeout(() => targetNodeElement.classed('blink', false), 500);
+        // Fait clignoter la destination pour qu'une rafale reste visible même lorsque la flèche
+        // est courte.
+        const elementCible = groupeNoeuds.selectAll('.node').filter(d => d.id === idCible);
+        if (!elementCible.empty()) {
+            elementCible.classed('blink', false);
+            // Force un recalcul de mise en page pour que l'animation reparte en cas de tirs
+            // répétés.
+            void elementCible.node().getBoundingClientRect();
+            elementCible.classed('blink', true);
+            setTimeout(() => elementCible.classed('blink', false), 500);
         }
 
-        const tempLink = config.drawLink(linkGroup, sourceNode, targetNode, type);
-        tempLink.transition()
+        const lienTemporaire = config.drawLink(groupeLiens, noeudSource, noeudCible, type);
+        lienTemporaire.transition()
             .duration(2000)
             .style("opacity", 0)
             .remove();
     }
 
-    function updateGraph() {
-        nodeGroup.selectAll(".node")
-            .data(nodes, d => d.id)
+    function mettreAJourGraphe() {
+        groupeNoeuds.selectAll(".node")
+            .data(noeuds, d => d.id)
             .join(
-                enter => {
-                    const nodeEnter = enter.append("g")
+                entrant => {
+                    const noeudEntrant = entrant.append("g")
                         .attr("class", d => `node ${d.roles.join(' ')}`)
-                        .call(drag);
-                    nodeEnter.append("circle").attr("r", radius);
-                    nodeEnter.append("text")
+                        .call(glisser);
+                    noeudEntrant.append("circle").attr("r", rayon);
+                    noeudEntrant.append("text")
                         .attr("dy", ".35em")
-                        .attr("y", radius + 15)
+                        .attr("y", rayon + 15)
                         .text(d => d.name);
-                    return nodeEnter;
+                    return noeudEntrant;
                 },
-                update => update.attr("class", d => `node ${d.roles.join(' ')}`),
-                // Evicted nodes were previously left in the DOM forever.
-                exit => exit.remove()
+                miseAJour => miseAJour.attr("class", d => `node ${d.roles.join(' ')}`),
+                // Les nœuds évincés restaient auparavant dans le DOM indéfiniment.
+                sortant => sortant.remove()
             );
 
-        simulation.nodes(nodes);
+        simulation.nodes(noeuds);
     }
 
-    function relayout() {
-        config.positionNodes(nodes, width, height);
-        updateGraph();
+    function repositionner() {
+        config.positionNodes(noeuds, largeur, hauteur);
+        mettreAJourGraphe();
         simulation.alpha(0.3).restart();
     }
 
-    simulation.on("tick", () => config.tickHandler(nodeGroup, linkGroup));
+    simulation.on("tick", () => config.tickHandler(groupeNoeuds, groupeLiens));
 
     // --- Zoom --------------------------------------------------------------------------------
     const zoom = d3.zoom()
         .scaleExtent([0.2, 5])
-        .on("zoom", (event) => g.attr("transform", event.transform));
+        .on("zoom", (evenement) => g.attr("transform", evenement.transform));
     svg.call(zoom);
 
-    // --- Resize ------------------------------------------------------------------------------
+    // --- Redimensionnement -------------------------------------------------------------------
     if (typeof ResizeObserver === 'function') {
-        let resizeTimer = null;
+        let minuteurRedimensionnement = null;
         new ResizeObserver(() => {
-            // Coalesce: a window drag fires this continuously.
-            if (resizeTimer !== null) clearTimeout(resizeTimer);
-            resizeTimer = setTimeout(() => {
-                resizeTimer = null;
-                measure();
-                const center = simulation.force("center");
-                if (center) center.x(width / 2).y(height / 2);
-                relayout();
+            // Regroupement : un glissement de fenêtre déclenche cet événement en continu.
+            if (minuteurRedimensionnement !== null) clearTimeout(minuteurRedimensionnement);
+            minuteurRedimensionnement = setTimeout(() => {
+                minuteurRedimensionnement = null;
+                mesurer();
+                const centre = simulation.force("center");
+                if (centre) centre.x(largeur / 2).y(hauteur / 2);
+                repositionner();
             }, 150);
-        }).observe(svgNode);
+        }).observe(noeudSvg);
     }
 
-    // --- Initialization ----------------------------------------------------------------------
-    async function initializeGraph() {
-        const state = await fetchJson('/graph/state');
+    // --- Initialisation ----------------------------------------------------------------------
+    async function initialiserGraphe() {
+        const etat = await fetchJson('/graph/state');
 
-        const loadingText = svg.select('#loading-text');
-        if (!loadingText.empty()) loadingText.remove();
+        const texteChargement = svg.select('#loading-text');
+        if (!texteChargement.empty()) texteChargement.remove();
 
-        // Guard every field: a partial response used to throw inside the socket callback and
-        // leave the page stuck on "En attente de données...".
-        (state.producers || []).forEach(p => addOrUpdateNode(p, 'producer'));
-        (state.topics || []).forEach(t => addOrUpdateNode(t, 'topic'));
-        (state.consumers || []).forEach(c => addOrUpdateNode(c, 'consumer'));
+        // On protège chaque champ : une réponse partielle levait auparavant une exception à
+        // l'intérieur du callback du socket et laissait la page bloquée sur
+        // « En attente de données... ».
+        (etat.producers || []).forEach(p => ajouterOuMettreAJourNoeud(p, 'producer'));
+        (etat.topics || []).forEach(t => ajouterOuMettreAJourNoeud(t, 'topic'));
+        (etat.consumers || []).forEach(c => ajouterOuMettreAJourNoeud(c, 'consumer'));
 
-        measure();
-        relayout();
+        mesurer();
+        repositionner();
     }
 
-    function handleEvent(data, type) {
-        const {producer, topic, consumer} = data;
-        let changed = false;
+    function traiterEvenement(donnees, type) {
+        const {producer, topic, consumer} = donnees;
+        let modifie = false;
 
-        if (producer) changed = addOrUpdateNode(producer, 'producer') || changed;
-        if (topic) changed = addOrUpdateNode(topic, 'topic') || changed;
-        if (consumer) changed = addOrUpdateNode(consumer, 'consumer') || changed;
+        if (producer) modifie = ajouterOuMettreAJourNoeud(producer, 'producer') || modifie;
+        if (topic) modifie = ajouterOuMettreAJourNoeud(topic, 'topic') || modifie;
+        if (consumer) modifie = ajouterOuMettreAJourNoeud(consumer, 'consumer') || modifie;
 
-        // Only relayout when the node set actually changed. The previous code restarted the force
-        // simulation on every single event, which kept the CPU busy under load for no visual gain.
-        if (changed) relayout();
+        // On ne repositionne que si l'ensemble des nœuds a réellement changé. Le code précédent
+        // relançait la simulation de forces à chaque événement, ce qui occupait le processeur en
+        // charge sans le moindre gain visuel.
+        if (modifie) repositionner();
 
-        if (type === 'publish') drawTemporaryArrow(producer, topic, 'publish');
-        else if (type === 'consume') drawTemporaryArrow(topic, consumer, 'consume');
-        else if (type === 'consumed') drawTemporaryArrow(topic, consumer, 'consumed');
+        if (type === 'publish') dessinerFlecheTemporaire(producer, topic, 'publish');
+        else if (type === 'consume') dessinerFlecheTemporaire(topic, consumer, 'consume');
+        else if (type === 'consumed') dessinerFlecheTemporaire(topic, consumer, 'consumed');
     }
 
-    function loadState() {
-        initializeGraph().catch(err => {
-            console.error('Failed to initialize graph:', err);
+    function chargerEtat() {
+        initialiserGraphe().catch(err => {
+            console.error("Échec de l'initialisation du graphe :", err);
             setConnectionState('disconnected', 'état indisponible');
         });
     }
 
-    const socket = trackConnection(io(), 'graph');
+    const socket = trackConnection(io(), 'graphe');
 
-    // Re-sync on every (re)connect, and once up front so the graph still renders the current
-    // state if the socket never comes up.
-    socket.on('connect', loadState);
-    loadState();
+    // Resynchronisation à chaque (re)connexion, plus un premier chargement immédiat pour que le
+    // graphe affiche l'état courant même si le socket ne s'établit jamais.
+    socket.on('connect', chargerEtat);
+    chargerEtat();
 
-    socket.on('new_message', (data) => handleEvent(data, 'publish'));
-    socket.on('new_consumption', (data) => handleEvent(data, 'consume'));
-    socket.on('consumed', (data) => handleEvent(data, 'consumed'));
-    // A client connecting is not a consumption: register the nodes but do not draw a delivery
-    // arrow for it, which is what the old `new_client -> consume` mapping did.
-    socket.on('new_client', (data) => handleEvent(data, 'connect'));
+    socket.on('new_message', (donnees) => traiterEvenement(donnees, 'publish'));
+    socket.on('new_consumption', (donnees) => traiterEvenement(donnees, 'consume'));
+    socket.on('consumed', (donnees) => traiterEvenement(donnees, 'consumed'));
+    // La connexion d'un client n'est pas une consommation : on enregistre les nœuds sans tracer de
+    // flèche de livraison, contrairement à l'ancienne correspondance `new_client -> consume`.
+    socket.on('new_client', (donnees) => traiterEvenement(donnees, 'connect'));
 }

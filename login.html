@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
     <meta charset="UTF-8"/>
     <meta content="width=device-width, initial-scale=1" name="viewport"/>
     <title>Dashboard Login</title>
-    <!-- Loaded for its shared helpers only; login.html is not a protected page so the guard's
-         redirect logic is a no-op here. -->
+    <!-- Chargé uniquement pour ses fonctions utilitaires partagées : login.html n'est pas une page
+         protégée, la logique de redirection de la garde n'a donc aucun effet ici. -->
     <script src="/static/dashboard-guard.js"></script>
     <style>
         * {
@@ -194,15 +194,15 @@
     const loginBtn = document.getElementById('loginBtn');
     const statusMessage = document.getElementById('statusMessage');
 
-    // dashboard-guard.js is loaded above purely for these shared helpers: it validates the
-    // ?redirect= target against the list of known dashboard pages. Without that check,
-    // /login.html?redirect=https://evil.example is an open redirect that sends users off-site
-    // straight after a successful "login".
+    // dashboard-guard.js est chargé plus haut uniquement pour ces fonctions partagées : il valide
+    // la cible ?redirect= face à la liste des pages connues du dashboard. Sans ce contrôle,
+    // /login.html?redirect=https://exemple-malveillant constitue une redirection ouverte qui
+    // envoie l'utilisateur hors du site juste après une « connexion » réussie.
     const guard = window.dashboardGuard;
 
-    function redirectTarget() {
-        const raw = new URLSearchParams(window.location.search).get('redirect');
-        return guard.safeRedirectTarget(raw);
+    function cibleRedirection() {
+        const brut = new URLSearchParams(window.location.search).get('redirect');
+        return guard.safeRedirectTarget(brut);
     }
 
     loginBtn.addEventListener('click', async () => {
@@ -215,24 +215,24 @@
             const response = await fetch('/dashboard/login', {method: 'POST'});
             if (!response.ok) {
                 // noinspection ExceptionCaughtLocallyJS
-                throw new Error(`Server responded ${response.status}`);
+                throw new Error(`Le serveur a répondu ${response.status}`);
             }
             const data = await response.json();
 
             if (!data.dashboard_enabled) {
                 // noinspection ExceptionCaughtLocallyJS
-                throw new Error('Failed to enable dashboard');
+                throw new Error("Échec de l'activation du dashboard");
             }
 
             guard.writeEnabled(true);
             statusMessage.textContent = '✓ Dashboard activé !';
 
-            const target = redirectTarget();
+            const cible = cibleRedirection();
             setTimeout(() => {
-                window.location.href = target;
+                window.location.href = cible;
             }, 500);
         } catch (error) {
-            console.error('Login error:', error);
+            console.error('Erreur de connexion :', error);
             statusMessage.textContent = '❌ Erreur de connexion';
             statusMessage.style.color = '#ef4444';
             loginBtn.disabled = false;
@@ -243,22 +243,22 @@
         }
     });
 
-    // If the dashboard is already enabled, skip straight to it. The local flag alone is not
-    // enough: a server restart resets the real flag, and trusting localStorage then dropped the
-    // user on a dashboard that would never receive a single event.
-    (async function skipIfAlreadyEnabled() {
+    // Si le dashboard est déjà actif, on y va directement. Le drapeau local ne suffit pas : un
+    // redémarrage du serveur réinitialise le vrai drapeau, et se fier à localStorage déposait
+    // alors l'utilisateur sur un dashboard qui ne recevrait jamais le moindre événement.
+    (async function allerDirectementSiDejaActive() {
         if (!guard.readEnabled()) return;
         try {
             const response = await fetch('/dashboard/status');
             if (!response.ok) return;
             const data = await response.json();
             if (data.dashboard_enabled) {
-                window.location.replace(redirectTarget());
+                window.location.replace(cibleRedirection());
             } else {
                 guard.writeEnabled(false);
             }
         } catch (error) {
-            console.warn('Could not verify dashboard status:', error);
+            console.warn("Impossible de vérifier l'état du dashboard :", error);
         }
     })();
 </script>

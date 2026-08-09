@@ -1,140 +1,138 @@
 /**
  * circular-graph.js
- * Configures and initializes a graph with a circular layout.
+ * Configure et initialise un graphe à disposition circulaire.
  */
-// import { createGraph } from './common-graph.js';
 
 document.addEventListener("DOMContentLoaded", () => {
-    // Helper to calculate straight line path (not curved)
-    function calculateStraightPath(source, target) {
-        const radius = 20; // Circle radius
-        const dx = target.x - source.x;
-        const dy = target.y - source.y;
+    // Calcule le chemin d'une ligne droite (et non courbe).
+    function calculerCheminDroit(source, cible) {
+        const rayon = 20; // Rayon des cercles représentant les nœuds.
+        const dx = cible.x - source.x;
+        const dy = cible.y - source.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
         if (distance === 0) return "";
 
-        // Calculate arrival point on target circle edge
-        const targetX = target.x - (dx / distance) * radius;
-        const targetY = target.y - (dy / distance) * radius;
+        // Calcule le point d'arrivée sur le bord du cercle cible.
+        const cibleX = cible.x - (dx / distance) * rayon;
+        const cibleY = cible.y - (dy / distance) * rayon;
 
-        // Return straight line path (not curved)
-        return `M${source.x},${source.y}L${targetX},${targetY}`;
+        return `M${source.x},${source.y}L${cibleX},${cibleY}`;
     }
 
-    // Circular graph specific configuration
-    const circularGraphConfig = {
+    // Configuration spécifique au graphe circulaire.
+    const configurationGrapheCirculaire = {
         svgSelector: "#activity-svg",
         arrow: {refX: 2, orient: "auto-start-reverse"},
 
-        createSimulation: (width, height) => {
+        createSimulation: (largeur, hauteur) => {
             return d3.forceSimulation()
                 .force("charge", d3.forceManyBody().strength(-50))
-                .force("center", d3.forceCenter(width / 2, height / 2))
+                .force("center", d3.forceCenter(largeur / 2, hauteur / 2))
                 .alphaDecay(0.1)
                 .velocityDecay(0.8);
         },
 
-        positionNodes: (nodes, width, height) => {
-            const numNodes = nodes.length;
-            if (numNodes === 0) return;
-            const angleStep = (2 * Math.PI) / numNodes;
-            const circleRadius = Math.min(width, height) / 3;
+        positionNodes: (noeuds, largeur, hauteur) => {
+            const nombreNoeuds = noeuds.length;
+            if (nombreNoeuds === 0) return;
+            const pasAngulaire = (2 * Math.PI) / nombreNoeuds;
+            const rayonCercle = Math.min(largeur, hauteur) / 3;
 
-            nodes.forEach((node, i) => {
-                const angle = i * angleStep;
-                // Fix position for a perfect circle
-                node.fx = width / 2 + circleRadius * Math.cos(angle);
-                node.fy = height / 2 + circleRadius * Math.sin(angle);
+            noeuds.forEach((noeud, i) => {
+                const angle = i * pasAngulaire;
+                // Position figée pour obtenir un cercle parfait.
+                noeud.fx = largeur / 2 + rayonCercle * Math.cos(angle);
+                noeud.fy = hauteur / 2 + rayonCercle * Math.sin(angle);
             });
         },
 
-        drawLink: (linkGroup, sourceNode, targetNode, type) => {
-            // Create a group for the arrow animation
-            const arrowGroup = linkGroup.append("g")
-                .datum({source: sourceNode, target: targetNode, type: type});
+        drawLink: (groupeLiens, noeudSource, noeudCible, type) => {
+            // Groupe dédié à l'animation de la flèche.
+            const groupeFleche = groupeLiens.append("g")
+                .datum({source: noeudSource, target: noeudCible, type: type});
 
-            // Draw the invisible base line (for path reference)
-            const baseLine = arrowGroup.append("path")
+            // Trace la ligne de base invisible, qui sert de chemin de référence.
+            const ligneBase = groupeFleche.append("path")
                 .attr("class", "base-line")
-                .attr("d", calculateStraightPath(sourceNode, targetNode))
+                .attr("d", calculerCheminDroit(noeudSource, noeudCible))
                 .style("stroke", "none")
                 .style("fill", "none");
 
-            // Get the color based on type
-            const arrowColor = type === 'publish' ? '#28a745' : type === 'consume' ? '#ffab40' : '#dc3545';
+            // Couleur en fonction du type d'événement.
+            const couleurFleche = type === 'publish' ? '#28a745' : type === 'consume' ? '#ffab40' : '#dc3545';
 
-            // Create the animated arrow (small line with arrowhead)
-            const animatedArrow = arrowGroup.append("path")
+            // Flèche animée (court segment terminé par une pointe).
+            const flecheAnimee = groupeFleche.append("path")
                 .attr("class", `animated-arrow ${type}`)
                 .attr("marker-end", `url(#arrow-${type})`)
-                .style("stroke", arrowColor)
+                .style("stroke", couleurFleche)
                 .style("stroke-width", 2)
                 .style("fill", "none");
 
-            // Calculate the path length for animation
-            const pathNode = baseLine.node();
-            const pathLength = pathNode.getTotalLength();
+            // Longueur du chemin, nécessaire à l'animation.
+            const noeudChemin = ligneBase.node();
+            const longueurChemin = noeudChemin.getTotalLength();
 
-            // A zero-length path (source and target at the same point) has no point to sample:
-            // getPointAtLength would be meaningless and the arrow invisible anyway.
-            if (!(pathLength > 0)) return arrowGroup;
+            // Un chemin de longueur nulle (source et cible au même point) n'offre aucun point à
+            // échantillonner : `getPointAtLength` n'aurait aucun sens et la flèche serait de toute
+            // façon invisible.
+            if (!(longueurChemin > 0)) return groupeFleche;
 
-            // Animate the arrow traveling along the path.
-            const animationDuration = 800; // 800ms for arrow to travel
-            // Length of the visible arrow segment. This used to be a flat 500px - far longer than
-            // any chord of the layout circle - so the "travelling" arrow was really just a line
-            // growing out of the source node and never detached from it. Scale it to the path
-            // instead, with a floor so very short links stay visible.
-            const arrowLength = Math.max(24, pathLength * 0.25);
+            // Animation du déplacement de la flèche le long du chemin.
+            const dureeAnimation = 800; // 800 ms pour parcourir le chemin.
+            // Longueur du segment visible. C'était auparavant une valeur fixe de 500 px, bien
+            // supérieure à n'importe quelle corde du cercle de disposition : la flèche
+            // « voyageuse » n'était donc en réalité qu'un trait qui s'allongeait depuis le nœud
+            // source, sans jamais s'en détacher. On la met à l'échelle du chemin, avec un plancher
+            // pour que les liens très courts restent visibles.
+            const longueurFleche = Math.max(24, longueurChemin * 0.25);
 
-            function animateArrow() {
-                const startTime = performance.now();
+            function animerFleche() {
+                const instantDepart = performance.now();
 
-                function frame(now) {
-                    const elapsed = now - startTime;
-                    const progress = Math.min(elapsed / animationDuration, 1);
+                function image(maintenant) {
+                    const ecoule = maintenant - instantDepart;
+                    const progression = Math.min(ecoule / dureeAnimation, 1);
 
-                    // Calculate current position along the path
-                    const currentLength = pathLength * progress;
-                    const startPoint = Math.max(0, currentLength - arrowLength);
-                    const endPoint = currentLength;
+                    // Position courante le long du chemin.
+                    const longueurCourante = longueurChemin * progression;
+                    const pointDepart = Math.max(0, longueurCourante - longueurFleche);
+                    const pointArrivee = longueurCourante;
 
-                    // Get points on the path
-                    const start = pathNode.getPointAtLength(startPoint);
-                    const end = pathNode.getPointAtLength(endPoint);
+                    const debut = noeudChemin.getPointAtLength(pointDepart);
+                    const fin = noeudChemin.getPointAtLength(pointArrivee);
 
-                    // Update the animated arrow path
-                    animatedArrow.attr("d", `M${start.x},${start.y}L${end.x},${end.y}`);
+                    flecheAnimee.attr("d", `M${debut.x},${debut.y}L${fin.x},${fin.y}`);
 
-                    if (progress < 1) {
-                        requestAnimationFrame(frame);
+                    if (progression < 1) {
+                        requestAnimationFrame(image);
                     }
                 }
 
-                requestAnimationFrame(frame);
+                requestAnimationFrame(image);
             }
 
-            // Start the animation
-            animateArrow();
+            animerFleche();
 
-            return arrowGroup;
+            return groupeFleche;
         },
 
-        tickHandler: (nodeGroup, linkGroup) => {
-            nodeGroup.selectAll('.node')
+        tickHandler: (groupeNoeuds, groupeLiens) => {
+            groupeNoeuds.selectAll('.node')
                 .attr("transform", d => `translate(${d.x || 0},${d.y || 0})`);
-            // Update straight line paths at each tick
-            linkGroup.selectAll('g').each(function (d) {
-                // Groups created outside drawLink carry no datum; skip them rather than throwing.
+            // Met à jour les chemins rectilignes à chaque battement de la simulation.
+            groupeLiens.selectAll('g').each(function (d) {
+                // Les groupes créés hors de `drawLink` ne portent pas de donnée : on les ignore
+                // plutôt que de lever une exception.
                 if (!d || !d.source || !d.target) return;
-                const group = d3.select(this);
-                group.select('.base-line').attr("d", calculateStraightPath(d.source, d.target));
-                // Note: animated arrow updates itself during animation
+                const groupe = d3.select(this);
+                groupe.select('.base-line').attr("d", calculerCheminDroit(d.source, d.target));
+                // Remarque : la flèche animée se met à jour d'elle-même pendant l'animation.
             });
         }
     };
 
-    // Create graph with its configuration
-    createGraph(circularGraphConfig);
+    // Crée le graphe à partir de sa configuration.
+    createGraph(configurationGrapheCirculaire);
 });

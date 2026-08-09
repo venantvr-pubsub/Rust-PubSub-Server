@@ -30,15 +30,15 @@ main {
     overflow-y: auto;
 }
 
-/* Shared page frame: clears the fixed navbar and leaves room at the bottom.
-   Replaces the inline `style="padding-top: 80px; ..."` that was duplicated on every page. */
+/* Cadre de page partagé : dégage la barre de navigation fixe et laisse de la marge en bas.
+   Remplace le `style="padding-top: 80px; ..."` en ligne, dupliqué sur chaque page. */
 .dashboard-main {
     padding-top: 80px;
     padding-bottom: 2rem;
-    min-height: 0; /* let flex children shrink so the graph containers can size themselves */
+    min-height: 0; /* laisse les enfants flex se rétrécir pour que les conteneurs de graphe se dimensionnent */
 }
 
-/* --- Connection indicator (driven by DashboardUtils.setConnectionState) --- */
+/* --- Indicateur de connexion (piloté par DashboardUtils.setConnectionState) --- */
 .connection-status {
     font-size: 0.8rem;
     font-weight: 600;
@@ -213,7 +213,7 @@ h2 {
     color: var(--text-color);
     font-weight: 600;
     background-color: rgba(255, 255, 255, 0.08);
-    /* Keep the header visible while scrolling the 100-row body. */
+    /* Garde l'en-tête visible pendant le défilement des 100 lignes du corps. */
     position: sticky;
     top: 0;
     z-index: 1;
@@ -223,8 +223,8 @@ h2 {
     background-color: rgba(255, 255, 255, 0.08);
 }
 
-/* Message payloads and UUIDs are long and have no spaces; without this they force the table
-   wider than the viewport and the whole page scrolls sideways. */
+/* Les charges utiles et les UUID sont longs et sans espaces : sans cette règle, ils élargissent
+   le tableau au-delà de la fenêtre et toute la page défile horizontalement. */
 .table td {
     overflow-wrap: anywhere;
     vertical-align: middle;
