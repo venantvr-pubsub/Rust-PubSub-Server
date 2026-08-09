@@ -16,6 +16,9 @@ temps réel servi en fichiers statiques embarqués (`rust-embed`).
 - Dashboard : `login.html`, `control-panel.html`, `activity-map.html`, `circular-graph.html`
 - Écoute sur `0.0.0.0:5000` ; base définie par `DATABASE_FILE` (défaut : mémoire partagée)
 
+Aucune dépendance réseau à l'exécution : Bootstrap, Socket.IO et D3 sont embarqués dans le
+binaire sous `static/vendor/` (voir `static/vendor/README.md`).
+
 ## Architecture
 
 ```mermaid
@@ -112,8 +115,6 @@ ou des `*.html` exige une recompilation pour être servie.
 
 ## Pièges connus (revue d'août 2026)
 
-- Le dashboard s'appuie sur des CDN (Bootstrap, Socket.IO, D3) sans `integrity` : hors ligne,
-  les pages se chargent mais restent inertes.
 - `CorsLayer::permissive()` + absence d'authentification : `/publish` et `/dashboard/login`
   sont ouverts à n'importe quelle origine. `dashboard_enabled` est un drapeau **global au
   processus**, pas une session par utilisateur — une déconnexion coupe le flux pour tous.
