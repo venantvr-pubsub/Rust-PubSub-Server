@@ -64,16 +64,62 @@ where
     data
 }
 
+// Les deux stratégies d'émission sont mutuellement exclusives, mais rien n'obligeait à en activer
+// une : `--no-default-features` compilait sans erreur un serveur qui enregistrait bien les messages
+// mais ne les livrait à aucun abonné. On transforme donc ce piège en erreur de compilation.
+#[cfg(not(any(feature = "parallel-emit", feature = "sequential-emit")))]
+compile_error!(
+    "Activez exactement une stratégie d'émission : --features parallel-emit (défaut) ou sequential-emit"
+);
+
+#[cfg(all(feature = "parallel-emit", feature = "sequential-emit"))]
+compile_error!(
+    "Les features parallel-emit et sequential-emit s'excluent : chaque message serait émis deux fois"
+);
+
+// Réponse d'erreur JSON. Le handler renvoyait auparavant un `StatusCode` nu, donc un corps vide :
+// côté navigateur, `response.json()` levait alors « Unexpected end of JSON input » et masquait la
+// vraie raison du rejet.
+fn error_response(status: StatusCode, message: &str) -> (StatusCode, Json<serde_json::Value>) {
+    (
+        status,
+        Json(serde_json::json!({"status": "error", "message": message})),
+    )
+}
+
 // Handler pour la publication de messages via une requête POST sur `/publish`.
 pub async fn publish_handler(
     // `State` est un extracteur Axum qui injecte l'état partagé de l'application.
     State((state, io)): State<(AppState, SocketIo)>,
     // `Json` est un extracteur qui désérialise le corps de la requête en une structure Rust.
     Json(payload): Json<PublishRequest>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Validation simple des données d'entrée.
-    if payload.topic.is_empty() || payload.message_id.is_empty() || payload.producer.is_empty() {
-        return Err(StatusCode::BAD_REQUEST);
+    if payload.topic.is_empty() {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "`topic` est requis et ne peut pas être vide",
+        ));
+    }
+    if payload.message_id.is_empty() {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "`message_id` est requis et ne peut pas être vide",
+        ));
+    }
+    if payload.producer.is_empty() {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "`producer` est requis et ne peut pas être vide",
+        ));
+    }
+    // `__all__` est la salle interne utilisée pour les abonnements wildcard : un topic portant ce
+    // nom livrerait ses messages en double à tous les abonnés wildcard.
+    if payload.topic == "__all__" {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "`__all__` est un nom de salle réservé et ne peut pas être utilisé comme topic",
+        ));
     }
 
     info!(
@@ -91,6 +137,15 @@ pub async fn publish_handler(
             payload.producer.clone(),
         )
         .await;
+
+    // Le dashboard recharge `/messages` dès qu'il reçoit `new_message` : purger le cache ici évite
+    // de lui resservir un instantané antérieur à ce message.
+    state.cache.invalidate_messages().await;
+
+    // Relaie aussi le message aux clients WebSocket bruts (`/ws`), qui s'abonnent via
+    // `state.topic_channels`. Sans cela, ces canaux étaient alimentés par personne : un client
+    // `/ws` pouvait s'abonner avec succès puis n'obtenir jamais le moindre message.
+    fanout_to_ws_subscribers(&state, &payload).await;
 
     // Émet le message via Socket.IO aux clients abonnés.
     // La compilation conditionnelle (`cfg`) permet de choisir entre deux stratégies d'émission.
@@ -119,6 +174,28 @@ pub async fn publish_handler(
     }
 
     Ok(Json(serde_json::json!({"status": "ok"})))
+}
+
+// Diffuse le message sur les canaux `broadcast` consommés par les connexions `/ws`.
+async fn fanout_to_ws_subscribers(state: &AppState, payload: &PublishRequest) {
+    let serialized = match serde_json::to_string(payload) {
+        Ok(text) => text,
+        Err(e) => {
+            tracing::error!("Sérialisation du message impossible pour les clients /ws: {}", e);
+            return;
+        }
+    };
+
+    // Verrou en lecture seulement : on n'ajoute jamais de canal ici, on ne publie que sur ceux
+    // qu'un abonné a déjà créés. `send` échoue quand il ne reste aucun abonné, ce qui est normal.
+    let channels = state.topic_channels.read().await;
+    if let Some(tx) = channels.get(&payload.topic) {
+        let _ = tx.send(serialized.clone());
+    }
+    // Les abonnés wildcard `/ws` rejoignent le canal "*".
+    if let Some(tx) = channels.get("*") {
+        let _ = tx.send(serialized);
+    }
 }
 
 // Handler pour GET `/api/clients` : retourne la liste des clients connectés.

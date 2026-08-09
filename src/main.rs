@@ -42,14 +42,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_file = std::env::var("DATABASE_FILE").unwrap_or_else(|_| ":memory:".to_string());
 
     info!("Initializing database...");
-    // Initialise la base de données (crée le fichier, applique les migrations, etc.).
+    // Initialise la base de données (crée le fichier, applique les migrations, configure le pool).
+    // La taille du pool est fixée dans `init_database` : `PRAGMA max_connections` n'existe pas
+    // dans SQLite et n'a jamais eu le moindre effet ici.
     let pool = init_database(&db_file).await?;
-
-    // Limite le nombre de connexions pour éviter de surcharger la base de données.
-    sqlx::query("PRAGMA max_connections = 10")
-        .execute(&pool)
-        .await
-        .ok();
 
     // Crée un canal de diffusion (`broadcast`) pour les événements internes de l'application.
     // `1000` est la capacité du canal.

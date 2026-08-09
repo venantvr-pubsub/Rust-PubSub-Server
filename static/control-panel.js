@@ -1,16 +1,25 @@
 document.addEventListener("DOMContentLoaded", () => {
-    const MAX_LIST_SIZE = 100; // Limite globale pour toutes les listes
+    const {
+        formatTimestamp, formatPayload, renderRows, renderNotice,
+        coalesce, trackConnection, fetchJson
+    } = window.DashboardUtils;
 
-    // Generate a UUID v4 for message IDs
+    // Génère un UUID v4 pour les identifiants de message.
+    // `crypto.randomUUID` est disponible sur tous les navigateurs capables d'afficher le reste de
+    // cette page ; le repli sur Math.random n'existe que pour les origines hors contexte sécurisé
+    // (http simple sur une IP de réseau local), où `crypto.randomUUID` n'est pas exposé.
     function uuidv4() {
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-            let r = Math.random() * 16 | 0,
-                v = c === 'x' ? r : (r & 0x3 | 0x8);
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+            return window.crypto.randomUUID();
+        }
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
             return v.toString(16);
         });
     }
 
-    // Base message class for structuring messages
+    // Classe de base pour structurer les messages.
     class BaseMessage {
         constructor(producer, payload, message_id = null) {
             this.message_id = message_id || uuidv4();
@@ -28,189 +37,231 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // Specific business class for text messages
+    // Classe métier spécifique aux messages texte.
     class TextMessage extends BaseMessage {
         constructor(text, producer, message_id) {
             super(producer, {text: text}, message_id);
         }
     }
 
-    let socket;
+    // --- Définition des tableaux -------------------------------------------------------------
+    // Une entrée par onglet. Les `cellules` sont de simples accesseurs ; renderRows les écrit via
+    // textContent, donc rien ici ne peut injecter de balisage.
+    const TABLEAUX = {
+        clients: {
+            cible: '#clients',
+            tbody: document.querySelector('#clientsTable tbody'),
+            url: '/clients',
+            vide: 'Aucun client connecté',
+            cellules: [
+                c => c.consumer,
+                c => c.topic,
+                c => formatTimestamp(c.connected_at)
+            ]
+        },
+        messages: {
+            cible: '#messages',
+            tbody: document.querySelector('#messagesTable tbody'),
+            url: '/messages',
+            vide: 'Aucun message publié',
+            cellules: [
+                m => m.producer,
+                m => m.topic,
+                m => m.message_id,
+                m => formatPayload(m.message),
+                m => formatTimestamp(m.timestamp)
+            ]
+        },
+        consumptions: {
+            cible: '#consumptions',
+            tbody: document.querySelector('#consTable tbody'),
+            url: '/consumptions',
+            vide: 'Aucune consommation enregistrée',
+            cellules: [
+                c => c.consumer,
+                c => c.topic,
+                c => c.message_id,
+                c => formatPayload(c.message),
+                c => formatTimestamp(c.timestamp)
+            ]
+        }
+    };
 
-    // Handle connect and subscribe button click
-    document.getElementById("connectBtn").addEventListener("click", () => {
-        const consumer = document.getElementById("consumer").value;
+    // Onglet actuellement visible. Seul ce tableau est rechargé lorsqu'un événement arrive ; les
+    // autres sont marqués périmés et rechargés au changement d'onglet. Auparavant, les trois
+    // tableaux étaient rechargés à chaque événement, y compris les deux que personne ne regardait.
+    let tableauActif = 'clients';
+    const perimes = new Set();
+
+    async function charger(cle) {
+        const tableau = TABLEAUX[cle];
+        if (!tableau || !tableau.tbody) return;
+        try {
+            const lignes = await fetchJson(tableau.url);
+            // On ne vide le corps du tableau qu'une fois les données arrivées. L'ancien code le
+            // vidait d'abord, ce qui faisait clignoter « En attente... » à chaque rafraîchissement
+            // alors que des données étaient déjà affichées.
+            renderRows(tableau.tbody, lignes, tableau.cellules, tableau.vide);
+            perimes.delete(cle);
+        } catch (erreur) {
+            console.error(`Erreur lors de la récupération de ${tableau.url} :`, erreur);
+            renderNotice(tableau.tbody, tableau.cellules.length, 'Erreur de chargement', 'text-danger');
+        }
+    }
+
+    // Un regroupeur par tableau : une rafale d'événements se réduit à un seul chargement.
+    const rafraichir = {};
+    for (const cle of Object.keys(TABLEAUX)) {
+        rafraichir[cle] = coalesce(() => charger(cle), 250);
+    }
+
+    function invalider(cle) {
+        if (cle === tableauActif) {
+            rafraichir[cle]();
+        } else {
+            perimes.add(cle);
+        }
+    }
+
+    // --- Flux d'événements temps réel --------------------------------------------------------
+    // Ce socket sert uniquement à observer le broker. Il est créé une seule fois, au chargement de
+    // la page, afin que les tableaux soient remplis et restent à jour même si l'utilisateur ne
+    // touche jamais au bouton « Connect & Subscribe ». Auparavant, tous les gestionnaires vivaient
+    // à l'intérieur du gestionnaire de clic de ce bouton : un Control Panel fraîchement ouvert
+    // affichait donc trois tableaux vides tant qu'on n'avait pas cliqué.
+    const socketMoniteur = trackConnection(io(), 'moniteur');
+
+    socketMoniteur.on('connect', () => {
+        // Rechargement à la (re)connexion : les événements survenus pendant la coupure sont perdus.
+        for (const cle of Object.keys(TABLEAUX)) {
+            if (cle === tableauActif) rafraichir[cle].now();
+            else perimes.add(cle);
+        }
+    });
+
+    socketMoniteur.on('new_message', () => invalider('messages'));
+    socketMoniteur.on('new_client', () => invalider('clients'));
+    socketMoniteur.on('client_disconnected', () => invalider('clients'));
+    socketMoniteur.on('new_consumption', () => invalider('consumptions'));
+    socketMoniteur.on('consumed', () => invalider('consumptions'));
+
+    // --- Consommateur de test ----------------------------------------------------------------
+    // Une seconde connexion, indépendante, pour éprouver le broker depuis le navigateur.
+    // Elle ne doit PAS réutiliser le socket du moniteur : `io()` avec la même URL renvoie le
+    // gestionnaire mis en cache, si bien qu'appeler `io()` à répétition empilait un nouveau jeu de
+    // gestionnaires sur un seul et même socket et que chaque événement finissait traité N fois.
+    // `forceNew` donne à ce bouton sa propre connexion, que l'on démonte explicitement avant d'en
+    // ouvrir une autre.
+    let socketConsommateur = null;
+    const boutonConnexion = document.getElementById("connectBtn");
+
+    boutonConnexion.addEventListener("click", () => {
+        const consumer = document.getElementById("consumer").value.trim();
         const topics = document.getElementById("topics").value
             .split(",").map(s => s.trim()).filter(s => s);
 
         if (!consumer || topics.length === 0) {
-            alert("Please enter a consumer name and at least one topic.");
+            alert("Veuillez saisir un nom de consommateur et au moins un topic.");
             return;
         }
 
-        console.log(`Connecting as ${consumer} to topics: ${topics}`);
-
-        // If a socket already exists and is connected, disconnect first
-        if (socket && socket.connected) {
-            console.log("Disconnecting existing socket before new connection.");
-            socket.disconnect();
+        if (socketConsommateur) {
+            socketConsommateur.removeAllListeners();
+            socketConsommateur.disconnect();
+            socketConsommateur = null;
         }
 
-        socket = io({
+        console.log(`Connexion en tant que ${consumer} aux topics : ${topics.join(', ')}`);
+
+        socketConsommateur = io({
+            forceNew: true,
             reconnection: true,
             reconnectionAttempts: Infinity,
             reconnectionDelay: 2000
         });
 
-        socket.on("connect", () => {
-            console.log("Connected to server.");
-            socket.emit("subscribe", {consumer, topics});
-            console.log(`Subscribed to topics: ${topics}`);
-            // Refresh admin tables on successful connection
-            refreshMessages();
-            refreshClients();
-            refreshConsumptions();
+        socketConsommateur.on("connect", () => {
+            console.log(`Consommateur de test connecté, abonnement à : ${topics.join(', ')}`);
+            socketConsommateur.emit("subscribe", {consumer, topics});
         });
 
-        socket.on("message", (data) => {
-            console.log(`Message received: ${JSON.stringify(data)}`);
-            // Message received - no UI display needed (removed Received Messages tab)
+        socketConsommateur.on("message", (donnees) => {
+            // Reçu par ce navigateur en tant qu'abonné. Les tableaux sont alimentés par le socket
+            // moniteur : il n'y a donc rien à afficher ici.
+            console.log('Message reçu :', donnees);
         });
 
-        socket.on("disconnect", () => console.log("Disconnected from server."));
-        socket.on("new_message", () => refreshMessages());
-        socket.on("new_client", () => refreshClients());
-        socket.on("client_disconnected", () => refreshClients());
-        socket.on("new_consumption", () => refreshConsumptions());
-        socket.on("consumed", (data) => {
-            console.log(`Consumed by handler: ${data.consumer} - Topic: ${data.topic} - Message ID: ${data.message_id}`);
-            refreshConsumptions();
+        socketConsommateur.on("disconnect", (raison) => {
+            console.log(`Consommateur de test déconnecté : ${raison}`);
+        });
+
+        socketConsommateur.on("connect_error", (erreur) => {
+            console.error('Erreur de connexion du consommateur de test :', erreur);
         });
     });
 
-    document.getElementById("pubBtn").addEventListener("click", () => {
-        const topic = document.getElementById("pubTopic").value;
-        const messageText = document.getElementById("pubMessage").value;
-        const producer = document.getElementById("pubProducer").value || "frontend_publisher";
+    // --- Publication -------------------------------------------------------------------------
+    const boutonPublier = document.getElementById("pubBtn");
 
-        if (!topic || !messageText) {
-            alert("Please enter a topic and a message to publish.");
+    boutonPublier.addEventListener("click", async () => {
+        const topic = document.getElementById("pubTopic").value.trim();
+        const texteMessage = document.getElementById("pubMessage").value;
+        const producer = document.getElementById("pubProducer").value.trim() || "frontend_publisher";
+
+        if (!topic || !texteMessage) {
+            alert("Veuillez saisir un topic et un message à publier.");
             return;
         }
 
-        const msg = new TextMessage(messageText, producer, uuidv4());
-        const payload = msg.toPayload(topic);
+        const payload = new TextMessage(texteMessage, producer, uuidv4()).toPayload(topic);
 
-        fetch("/publish", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify(payload)
-        })
-            .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(new Error(e.message))))
-            .then(data => {
-                console.log(`Publish response: ${JSON.stringify(data)}`);
-                document.getElementById("pubMessage").value = "";
-            })
-            .catch(err => {
-                console.error(`Publish error: ${err}`);
-                alert(`Failed to publish message: ${err.message}`);
+        boutonPublier.disabled = true;
+        try {
+            const reponse = await fetch("/publish", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(payload)
             });
+
+            if (!reponse.ok) {
+                // Le serveur peut répondre avec un corps JSON, ou sans corps du tout. Appeler
+                // aveuglément `response.json()` sur un corps vide lève une SyntaxError, qui
+                // remontait à l'utilisateur sous la forme « Unexpected end of JSON input » au lieu
+                // de la véritable cause de l'échec.
+                let detail = `HTTP ${reponse.status}`;
+                try {
+                    const corps = await reponse.json();
+                    if (corps && corps.message) detail = corps.message;
+                } catch (_) { /* pas de corps JSON — on garde la ligne de statut */ }
+                throw new Error(detail);
+            }
+
+            document.getElementById("pubMessage").value = "";
+            // L'événement de diffusion provoquera aussi un rafraîchissement, mais en déclencher un
+            // ici garantit que la ligne apparaît même si ce navigateur ne reçoit pas les
+            // événements pour une raison quelconque.
+            invalider('messages');
+        } catch (erreur) {
+            console.error('Erreur de publication :', erreur);
+            alert(`Échec de la publication du message : ${erreur.message}`);
+        } finally {
+            boutonPublier.disabled = false;
+        }
     });
 
-    // Helper function to format timestamp
-    function formatTimestamp(unixTimestamp) {
-        if (!unixTimestamp) return '';
-        return new Date(unixTimestamp * 1000).toLocaleString();
-    }
-
-    // Refresh the clients table
-    function refreshClients() {
-        console.log("Refreshing clients list");
-        const tbody = document.querySelector("#clientsTable tbody");
-        tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">En attente...</td></tr>';
-
-        fetch("/clients")
-            .then(r => r.json())
-            .then(clients => {
-                tbody.innerHTML = "";
-                if (clients.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">Aucun client connecté</td></tr>';
-                } else {
-                    // --- ADDITION: Limit number of displayed clients ---
-                    clients.slice(0, MAX_LIST_SIZE).forEach(c => {
-                        const tr = document.createElement("tr");
-                        tr.innerHTML = `<td>${c.consumer}</td><td>${c.topic}</td><td>${formatTimestamp(c.connected_at)}</td>`;
-                        tbody.appendChild(tr);
-                    });
-                }
-            })
-            .catch(err => {
-                console.error(`Error fetching clients: ${err}`);
-                tbody.innerHTML = '<tr><td colspan="3" class="text-center text-danger">Erreur de chargement</td></tr>';
-            });
-    }
-
-    // Refresh the messages table
-    function refreshMessages() {
-        console.log("Refreshing published messages list");
-        const tbody = document.querySelector("#messagesTable tbody");
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">En attente...</td></tr>';
-
-        fetch("/messages")
-            .then(r => r.json())
-            .then(messages => {
-                tbody.innerHTML = "";
-                if (messages.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Aucun message publié</td></tr>';
-                } else {
-                    // --- ADDITION: Limit number of displayed messages ---
-                    messages.slice(0, MAX_LIST_SIZE).forEach(m => {
-                        const tr = document.createElement("tr");
-                        tr.innerHTML = `<td>${m.producer}</td><td>${m.topic}</td><td>${JSON.stringify(m.message)}</td><td>${formatTimestamp(m.timestamp)}</td>`;
-                        tbody.appendChild(tr);
-                    });
-                    console.log(`Published messages list updated with ${messages.length} messages`);
-                }
-            })
-            .catch(err => {
-                console.error(`Error fetching messages: ${err}`);
-                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger">Erreur de chargement</td></tr>';
-            });
-    }
-
-    // Refresh the consumptions table
-    function refreshConsumptions() {
-        console.log("Refreshing consumptions list");
-        const tbody = document.querySelector("#consTable tbody");
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">En attente...</td></tr>';
-
-        fetch("/consumptions")
-            .then(r => r.json())
-            .then(consumptions => {
-                tbody.innerHTML = "";
-                if (consumptions.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Aucune consommation enregistrée</td></tr>';
-                } else {
-                    // --- AJOUT : Limiter le nombre de consommations affichées ---
-                    consumptions.slice(0, MAX_LIST_SIZE).forEach(c => {
-                        const tr = document.createElement("tr");
-                        tr.innerHTML = `<td>${c.consumer}</td><td>${c.topic}</td><td>${JSON.stringify(c.message)}</td><td>${formatTimestamp(c.timestamp)}</td>`;
-                        tbody.appendChild(tr);
-                    });
-                    console.log(`Consumptions list updated with ${consumptions.length} consumptions`);
-                }
-            })
-            .catch(err => {
-                console.error(`Error fetching consumptions: ${err}`);
-                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger">Erreur de chargement</td></tr>';
-            });
-    }
-
-    // Refresh tab content when switching tabs
-    document.getElementById('pubSubTabs').addEventListener('shown.bs.tab', function (event) {
-        const targetTab = event.target.getAttribute('data-bs-target');
-        if (targetTab === '#clients') refreshClients();
-        else if (targetTab === '#messages') refreshMessages();
-        else if (targetTab === '#consumptions') refreshConsumptions();
+    // --- Onglets -----------------------------------------------------------------------------
+    document.getElementById('pubSubTabs').addEventListener('shown.bs.tab', (evenement) => {
+        const cible = evenement.target.getAttribute('data-bs-target');
+        const entree = Object.entries(TABLEAUX).find(([, tableau]) => tableau.cible === cible);
+        if (!entree) return;
+        const [cle] = entree;
+        tableauActif = cle;
+        if (perimes.has(cle)) rafraichir[cle].now();
     });
+
+    // Chargement initial : l'onglet visible immédiatement, les autres marqués périmés.
+    for (const cle of Object.keys(TABLEAUX)) {
+        if (cle === tableauActif) rafraichir[cle].now();
+        else perimes.add(cle);
+    }
 });

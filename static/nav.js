@@ -13,24 +13,61 @@ document.addEventListener('DOMContentLoaded', function () {
 
     document.title = `${currentItem.label} - Pub/Sub Monitor`;
 
-    const navLinksHTML = navItems.map(item => {
-        const isActive = item.href === currentPath;
-        return `<a class="nav-link ${isActive ? 'active' : ''}" href="${item.href}">${item.label}</a>`;
-    }).join('');
+    const nav = document.createElement('nav');
+    nav.className = 'navbar navbar-dark fixed-top';
 
-    navContainer.innerHTML = `
-        <nav class="navbar navbar-dark fixed-top">
-            <div class="container" style="padding-left: 1.5rem; padding-right: 1.5rem;">
-                <div class="d-flex align-items-center">
-                    <a class="navbar-brand" href="/control-panel.html">📊 Pub/Sub Monitor</a>
-                    <div class="ms-4 d-flex gap-2">${navLinksHTML}</div>
-                </div>
-                <button class="btn btn-sm btn-outline-danger" id="dashboardLogoutBtn" style="margin-left: auto;">Logout</button>
-            </div>
-        </nav>
-    `;
+    const container = document.createElement('div');
+    container.className = 'container';
 
-    // On notifie le 'guard' que le bouton est prêt et qu'il peut y attacher l'action.
+    const left = document.createElement('div');
+    left.className = 'd-flex align-items-center';
+
+    const brand = document.createElement('a');
+    brand.className = 'navbar-brand';
+    brand.href = '/control-panel.html';
+    brand.textContent = '📊 Pub/Sub Monitor';
+    left.appendChild(brand);
+
+    const links = document.createElement('div');
+    links.className = 'ms-4 d-flex gap-2';
+    for (const item of navItems) {
+        const link = document.createElement('a');
+        link.className = item.href === currentPath ? 'nav-link active' : 'nav-link';
+        link.href = item.href;
+        link.textContent = item.label;
+        if (item.href === currentPath) link.setAttribute('aria-current', 'page');
+        links.appendChild(link);
+    }
+    left.appendChild(links);
+
+    const right = document.createElement('div');
+    right.className = 'd-flex align-items-center gap-3 ms-auto';
+
+    // Indicateur de connexion en direct, piloté par DashboardUtils.setConnectionState().
+    // Auparavant, rien sur la page n'indiquait si le flux d'événements était vivant : un socket
+    // mort ressemblait exactement à un système au repos.
+    const status = document.createElement('span');
+    status.id = 'connectionStatus';
+    status.className = 'connection-status';
+    status.dataset.state = 'connecting';
+    status.textContent = 'Connexion…';
+    right.appendChild(status);
+
+    const logout = document.createElement('button');
+    logout.className = 'btn btn-sm btn-outline-danger';
+    logout.id = 'dashboardLogoutBtn';
+    logout.type = 'button';
+    logout.textContent = 'Logout';
+    right.appendChild(logout);
+
+    container.appendChild(left);
+    container.appendChild(right);
+    nav.appendChild(container);
+    navContainer.replaceChildren(nav);
+
+    // La garde a enregistré son propre gestionnaire DOMContentLoaded avant celui-ci : à ce
+    // moment-là, le bouton n'existait pas encore. On lui demande donc de s'attacher maintenant ;
+    // setupLogout() est idempotente.
     if (window.dashboardGuard && typeof window.dashboardGuard.setupLogout === 'function') {
         window.dashboardGuard.setupLogout();
     }

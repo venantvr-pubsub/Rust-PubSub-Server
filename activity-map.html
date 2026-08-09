@@ -1,11 +1,12 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
     <meta charset="UTF-8"/>
+    <meta content="width=device-width, initial-scale=1" name="viewport"/>
     <title>Activity Map</title>
     <script src="/static/dashboard-guard.js"></script>
-    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"/>
+    <script src="/static/vendor/socket.io.min.js"></script>
+    <link href="/static/vendor/bootstrap.min.css" rel="stylesheet"/>
     <link href="/static/style.css" rel="stylesheet">
     <link href="/static/activity-map.css" rel="stylesheet">
 </head>
@@ -13,7 +14,7 @@
 
 <header id="main-header"></header>
 
-<main class="container flex-grow-1 d-flex flex-column" style="padding-top: 80px; padding-bottom: 2rem;">
+<main class="container dashboard-main d-flex flex-column">
     <div id="activity-map" class="flex-grow-1">
         <div class="map-column" id="producers-col"><h2>Producers</h2></div>
         <div class="map-column" id="topics-col"><h2>Topics</h2></div>
@@ -21,7 +22,8 @@
         <svg id="map-svg"></svg>
     </div>
 </main>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/static/vendor/bootstrap.bundle.min.js"></script>
+<script src="/static/dashboard-utils.js"></script>
 <script src="/static/nav.js"></script>
 <script src="/static/activity-map.js"></script>
 </body>

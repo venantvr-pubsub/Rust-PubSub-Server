@@ -30,6 +30,43 @@ main {
     overflow-y: auto;
 }
 
+/* Cadre de page partagé : dégage la barre de navigation fixe et laisse de la marge en bas.
+   Remplace le `style="padding-top: 80px; ..."` en ligne, dupliqué sur chaque page. */
+.dashboard-main {
+    padding-top: 80px;
+    padding-bottom: 2rem;
+    min-height: 0; /* laisse les enfants flex se rétrécir pour que les conteneurs de graphe se dimensionnent */
+}
+
+/* --- Indicateur de connexion (piloté par DashboardUtils.setConnectionState) --- */
+.connection-status {
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 0.25rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid var(--border-color);
+    white-space: nowrap;
+    transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.connection-status[data-state="connected"] {
+    color: var(--success-color);
+    background-color: rgba(34, 197, 94, 0.12);
+    border-color: rgba(34, 197, 94, 0.4);
+}
+
+.connection-status[data-state="connecting"] {
+    color: #ffab40;
+    background-color: rgba(255, 171, 64, 0.12);
+    border-color: rgba(255, 171, 64, 0.4);
+}
+
+.connection-status[data-state="disconnected"] {
+    color: #ef4444;
+    background-color: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
 h1 {
     font-size: 2.25rem;
     font-weight: 700;
@@ -59,6 +96,8 @@ h2 {
     display: flex;
     align-items: center;
     gap: 1.5rem;
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
 }
 
 .navbar-brand {
@@ -174,8 +213,19 @@ h2 {
     color: var(--text-color);
     font-weight: 600;
     background-color: rgba(255, 255, 255, 0.08);
+    /* Garde l'en-tête visible pendant le défilement des 100 lignes du corps. */
+    position: sticky;
+    top: 0;
+    z-index: 1;
 }
 
 .table tbody tr:hover {
     background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Les charges utiles et les UUID sont longs et sans espaces : sans cette règle, ils élargissent
+   le tableau au-delà de la fenêtre et toute la page défile horizontalement. */
+.table td {
+    overflow-wrap: anywhere;
+    vertical-align: middle;
 }

@@ -28,9 +28,16 @@ pub fn setup_socketio_handlers(io: socketioxide::SocketIo, state: AppState) {
                         data.consumer, sid, data.topics
                     );
 
-                    // Boucle sur chaque sujet demandé dans le message d'abonnement.
+                    // Le wildcard est décidé *avant* de rejoindre la moindre salle.
+                    // Auparavant le traitement se faisait sujet par sujet : `["*", "orders"]`
+                    // faisait `leave_all()` puis rejoignait `__all__`, et l'itération suivante
+                    // rejoignait aussi `orders` — le client recevait alors chaque message d'`orders`
+                    // en double. Avec `["orders", "*"]` le résultat était différent. Le
+                    // comportement dépendait donc de l'ordre de la liste.
+                    let has_wildcard = data.topics.iter().any(|t| t == "*");
+
+                    // Enregistre les abonnements dans le Broker (qui les sauvegarde en DB et en cache).
                     for topic in &data.topics {
-                        // Enregistre l'abonnement dans le Broker (qui le sauvegardera en DB et en cache).
                         state
                             .broker
                             .register_subscription(
@@ -39,22 +46,24 @@ pub fn setup_socketio_handlers(io: socketioxide::SocketIo, state: AppState) {
                                 topic.clone(),
                             )
                             .await;
+                    }
 
-                        // Utilise le système de "salles" (rooms) de Socket.IO pour gérer la diffusion.
-                        if topic == "*" {
-                            // Abonnement "wildcard" : le client reçoit tous les messages.
-                            // On le fait quitter toutes les autres salles et rejoindre une salle spéciale "__all__".
-                            socket.leave_all();
-                            socket.join("__all__");
-                            info!(
-                                "{} subscribed to ALL topics via wildcard '*'",
-                                data.consumer
-                            );
-                        } else {
+                    // Utilise le système de "salles" (rooms) de Socket.IO pour gérer la diffusion.
+                    if has_wildcard {
+                        // Abonnement "wildcard" : le client reçoit tous les messages via la salle
+                        // spéciale `__all__`, et uniquement par elle.
+                        socket.leave_all();
+                        socket.join("__all__");
+                        info!("{} subscribed to ALL topics via wildcard '*'", data.consumer);
+                    } else {
+                        for topic in &data.topics {
                             // Abonnement à un sujet spécifique : le client rejoint la salle correspondant au nom du sujet.
                             socket.join(topic.clone());
                         }
                     }
+
+                    // Un nouvel abonné change le graphe (nouveau consommateur / nouveau topic).
+                    state.cache.invalidate_graph().await;
 
                     // Envoie une confirmation d'abonnement au client.
                     let _ = socket.emit("subscribed", &serde_json::json!({"status": "ok"}));
@@ -74,6 +83,8 @@ pub fn setup_socketio_handlers(io: socketioxide::SocketIo, state: AppState) {
                         .broker
                         .save_consumption(data.consumer, data.topic, data.message_id, data.message)
                         .await;
+                    // Le dashboard recharge `/consumptions` sur l'événement `new_consumption`.
+                    state.cache.invalidate_consumptions().await;
                 }
             },
         );
@@ -86,6 +97,8 @@ pub fn setup_socketio_handlers(io: socketioxide::SocketIo, state: AppState) {
                 info!("Socket.IO client disconnected: {}", socket.id);
                 // Notifie le Broker que le client est parti pour nettoyer les abonnements.
                 state.broker.unregister_client(&socket.id.to_string()).await;
+                // Le consommateur disparaît du graphe.
+                state.cache.invalidate_graph().await;
             }
         });
     });
