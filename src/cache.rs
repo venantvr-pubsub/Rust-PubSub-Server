@@ -39,4 +39,29 @@ impl QueryCache {
             ttl: std::time::Duration::from_secs(ttl_secs),
         }
     }
+
+    // --- Invalidation explicite ---
+    //
+    // Le TTL seul ne suffit pas. Le dashboard réagit à l'événement `new_message` en rechargeant
+    // `/messages` immédiatement : sans invalidation, il recevait l'instantané mis en cache jusqu'à
+    // `ttl` secondes plus tôt, donc *sans* le message qui vient de déclencher le rafraîchissement.
+    // Le message n'apparaissait qu'au rafraîchissement suivant, ce qui donnait l'impression que le
+    // dashboard sautait des messages.
+
+    // Invalide le cache des messages et celui du graphe (un nouveau producteur/topic peut être apparu).
+    pub async fn invalidate_messages(&self) {
+        *self.messages.write().await = None;
+        *self.graph_state.write().await = None;
+    }
+
+    // Invalide le cache des consommations et celui du graphe.
+    pub async fn invalidate_consumptions(&self) {
+        *self.consumptions.write().await = None;
+        *self.graph_state.write().await = None;
+    }
+
+    // Invalide uniquement le graphe (nouvel abonnement, déconnexion d'un client).
+    pub async fn invalidate_graph(&self) {
+        *self.graph_state.write().await = None;
+    }
 }

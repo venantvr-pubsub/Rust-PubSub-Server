@@ -30,6 +30,43 @@ main {
     overflow-y: auto;
 }
 
+/* Shared page frame: clears the fixed navbar and leaves room at the bottom.
+   Replaces the inline `style="padding-top: 80px; ..."` that was duplicated on every page. */
+.dashboard-main {
+    padding-top: 80px;
+    padding-bottom: 2rem;
+    min-height: 0; /* let flex children shrink so the graph containers can size themselves */
+}
+
+/* --- Connection indicator (driven by DashboardUtils.setConnectionState) --- */
+.connection-status {
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 0.25rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid var(--border-color);
+    white-space: nowrap;
+    transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.connection-status[data-state="connected"] {
+    color: var(--success-color);
+    background-color: rgba(34, 197, 94, 0.12);
+    border-color: rgba(34, 197, 94, 0.4);
+}
+
+.connection-status[data-state="connecting"] {
+    color: #ffab40;
+    background-color: rgba(255, 171, 64, 0.12);
+    border-color: rgba(255, 171, 64, 0.4);
+}
+
+.connection-status[data-state="disconnected"] {
+    color: #ef4444;
+    background-color: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
 h1 {
     font-size: 2.25rem;
     font-weight: 700;
@@ -59,6 +96,8 @@ h2 {
     display: flex;
     align-items: center;
     gap: 1.5rem;
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
 }
 
 .navbar-brand {
@@ -174,8 +213,19 @@ h2 {
     color: var(--text-color);
     font-weight: 600;
     background-color: rgba(255, 255, 255, 0.08);
+    /* Keep the header visible while scrolling the 100-row body. */
+    position: sticky;
+    top: 0;
+    z-index: 1;
 }
 
 .table tbody tr:hover {
     background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Message payloads and UUIDs are long and have no spaces; without this they force the table
+   wider than the viewport and the whole page scrolls sideways. */
+.table td {
+    overflow-wrap: anywhere;
+    vertical-align: middle;
 }

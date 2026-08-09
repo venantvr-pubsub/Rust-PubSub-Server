@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8"/>
+    <meta content="width=device-width, initial-scale=1" name="viewport"/>
     <title>Dashboard Login</title>
+    <!-- Loaded for its shared helpers only; login.html is not a protected page so the guard's
+         redirect logic is a no-op here. -->
+    <script src="/static/dashboard-guard.js"></script>
     <style>
         * {
             margin: 0;
@@ -190,30 +194,43 @@
     const loginBtn = document.getElementById('loginBtn');
     const statusMessage = document.getElementById('statusMessage');
 
+    // dashboard-guard.js is loaded above purely for these shared helpers: it validates the
+    // ?redirect= target against the list of known dashboard pages. Without that check,
+    // /login.html?redirect=https://evil.example is an open redirect that sends users off-site
+    // straight after a successful "login".
+    const guard = window.dashboardGuard;
+
+    function redirectTarget() {
+        const raw = new URLSearchParams(window.location.search).get('redirect');
+        return guard.safeRedirectTarget(raw);
+    }
+
     loginBtn.addEventListener('click', async () => {
         loginBtn.disabled = true;
         statusMessage.classList.add('show');
+        statusMessage.style.color = '';
         statusMessage.textContent = 'Activation du dashboard...';
 
         try {
             const response = await fetch('/dashboard/login', {method: 'POST'});
+            if (!response.ok) {
+                // noinspection ExceptionCaughtLocallyJS
+                throw new Error(`Server responded ${response.status}`);
+            }
             const data = await response.json();
 
-            if (data.dashboard_enabled) {
-                localStorage.setItem('dashboardEnabled', 'true');
-                statusMessage.textContent = '✓ Dashboard activé !';
-
-                // Get redirect target from URL parameter or default to control panel
-                const urlParams = new URLSearchParams(window.location.search);
-                const redirectTo = urlParams.get('redirect') || '/control-panel.html';
-
-                setTimeout(() => {
-                    window.location.href = redirectTo;
-                }, 500);
-            } else {
+            if (!data.dashboard_enabled) {
                 // noinspection ExceptionCaughtLocallyJS
                 throw new Error('Failed to enable dashboard');
             }
+
+            guard.writeEnabled(true);
+            statusMessage.textContent = '✓ Dashboard activé !';
+
+            const target = redirectTarget();
+            setTimeout(() => {
+                window.location.href = target;
+            }, 500);
         } catch (error) {
             console.error('Login error:', error);
             statusMessage.textContent = '❌ Erreur de connexion';
@@ -226,13 +243,24 @@
         }
     });
 
-    // If already logged in, redirect immediately
-    if (localStorage.getItem('dashboardEnabled') === 'true') {
-        const urlParams = new URLSearchParams(window.location.search);
-        // noinspection UnnecessaryLocalVariableJS
-        const redirectTo = urlParams.get('redirect') || '/control-panel.html';
-        window.location.href = redirectTo;
-    }
+    // If the dashboard is already enabled, skip straight to it. The local flag alone is not
+    // enough: a server restart resets the real flag, and trusting localStorage then dropped the
+    // user on a dashboard that would never receive a single event.
+    (async function skipIfAlreadyEnabled() {
+        if (!guard.readEnabled()) return;
+        try {
+            const response = await fetch('/dashboard/status');
+            if (!response.ok) return;
+            const data = await response.json();
+            if (data.dashboard_enabled) {
+                window.location.replace(redirectTarget());
+            } else {
+                guard.writeEnabled(false);
+            }
+        } catch (error) {
+            console.warn('Could not verify dashboard status:', error);
+        }
+    })();
 </script>
 </body>
 </html>

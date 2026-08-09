@@ -151,6 +151,9 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: AppState) {
                                     let mut tasks = topic_tasks_clone.write().await;
                                     tasks.push(task);
                                 }
+
+                                // Un nouvel abonné change le graphe affiché par le dashboard.
+                                state.cache.invalidate_graph().await;
                             }
                         }
                         "consumed" => {
@@ -167,6 +170,7 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: AppState) {
                                         consumed_msg.message,
                                     )
                                     .await;
+                                state.cache.invalidate_consumptions().await;
                             }
                         }
                         _ => {}
@@ -176,17 +180,20 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: AppState) {
         }
     }
 
-    // --- Nettoyage --- 
+    // --- Nettoyage ---
     // Ce code est exécuté lorsque la boucle de réception se termine (client déconnecté).
     info!("Client disconnecting (SID: {})", sid);
     // Désenregistre le client du Broker.
     state.broker.unregister_client(&sid).await;
+    state.cache.invalidate_graph().await;
     // Arrête toutes les tâches de fond associées à ce client pour libérer les ressources.
     broadcast_task.abort();
     send_task.abort();
 
-    let tasks = topic_tasks.write().await;
-    for task in tasks.iter() {
+    let mut tasks = topic_tasks.write().await;
+    // `drain` plutôt qu'`iter` : les `JoinHandle` sont ainsi libérés en même temps qu'ils sont
+    // arrêtés, au lieu de rester dans le Vec jusqu'à la destruction de celui-ci.
+    for task in tasks.drain(..) {
         task.abort();
     }
 }

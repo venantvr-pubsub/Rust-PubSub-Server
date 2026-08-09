@@ -1,6 +1,17 @@
 // Importe le pool de connexions SQLite de SQLx et le logger `info` de `tracing`.
-use sqlx::sqlite::SqlitePool;
+use sqlx::sqlite::{
+    SqliteAutoVacuum, SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions,
+    SqliteSynchronous,
+};
+use std::str::FromStr;
+use std::time::Duration;
 use tracing::info;
+
+// Nombre maximum de connexions dans le pool.
+// Auparavant, `main.rs` exécutait `PRAGMA max_connections = 10` : ce PRAGMA n'existe pas dans
+// SQLite, la commande était silencieusement ignorée et le pool gardait la taille par défaut.
+// La taille d'un pool est une propriété du pool, pas de la base.
+const MAX_CONNECTIONS: u32 = 10;
 
 // Définit une structure pour représenter une migration de base de données.
 struct Migration {
@@ -31,53 +42,74 @@ const MIGRATIONS: &[Migration] = &[
         name: "add_subscriptions_table",
         sql: include_str!("../migrations/003_add_subscriptions_table.sql"),
     },
+    Migration {
+        version: 4,
+        name: "timestamp_indexes",
+        sql: include_str!("../migrations/004_timestamp_indexes.sql"),
+    },
 ];
 
 // Fonction asynchrone pour initialiser la base de données.
 // Retourne un `Result` avec le pool de connexions ou une erreur.
 pub async fn init_database(db_file: &str) -> Result<SqlitePool, Box<dyn std::error::Error>> {
-    // Se connecte à la base de données SQLite. `?mode=rwc` signifie "read-write-create" : ouvre en lecture/écriture, et crée le fichier s'il n'existe pas.
-    let pool = SqlitePool::connect(&format!("sqlite:{}?mode=rwc", db_file)).await?;
+    // Une base `:memory:` est privée à *chaque connexion*. Avec un pool multi-connexions, les
+    // migrations s'appliquaient donc sur une base et les requêtes suivantes pouvaient tomber sur
+    // une autre connexion, avec une base entièrement vide ("no such table: messages").
+    // On passe par une base mémoire *nommée* en cache partagé pour que toutes les connexions du
+    // pool voient bien la même base.
+    let in_memory = db_file.is_empty() || db_file == ":memory:";
 
-    // --- Configuration SQLite optimisée pour les performances en écriture et lecture --- 
-    // `PRAGMA` sont des commandes spécifiques à SQLite pour modifier son comportement.
+    let url = if in_memory {
+        "sqlite:file:pubsub_shared_mem?mode=memory&cache=shared".to_string()
+    } else {
+        // `mode=rwc` = "read-write-create" : ouvre en lecture/écriture et crée le fichier si besoin.
+        format!("sqlite:{}?mode=rwc", db_file)
+    };
 
-    // `journal_mode = WAL` (Write-Ahead Logging) : Améliore la concurrence en permettant aux lecteurs de ne pas être bloqués par les écritures.
-    sqlx::query("PRAGMA journal_mode = WAL")
-        .execute(&pool)
+    // --- Configuration SQLite optimisée pour les performances en écriture et lecture ---
+    //
+    // Les PRAGMA étaient auparavant exécutés une seule fois via `execute(&pool)`, ce qui les
+    // appliquait à *une* connexion prise au hasard dans le pool. Or `synchronous`, `cache_size`,
+    // `temp_store`, `mmap_size` et `busy_timeout` sont des réglages **par connexion** : les neuf
+    // autres connexions gardaient les valeurs par défaut (dont un `busy_timeout` à 0, d'où des
+    // erreurs `database is locked` sous charge au lieu d'une attente).
+    // En les déclarant ici, SQLx les rejoue sur chaque nouvelle connexion du pool.
+    let mut options = SqliteConnectOptions::from_str(&url)?
+        // WAL : les lecteurs ne sont plus bloqués par les écritures.
+        // (Ignoré pour une base en mémoire, qui ne peut pas utiliser le WAL.)
+        .journal_mode(if in_memory {
+            SqliteJournalMode::Memory
+        } else {
+            SqliteJournalMode::Wal
+        })
+        // NORMAL : moins de `fsync`, plus rapide, risque minime en cas de crash système.
+        .synchronous(SqliteSynchronous::Normal)
+        // Attend 5s si la base est verrouillée avant de retourner une erreur.
+        .busy_timeout(Duration::from_secs(5))
+        // 128 Mo de cache de pages (valeur négative = kibioctets).
+        .pragma("cache_size", "-128000")
+        // Tables temporaires en RAM.
+        .pragma("temp_store", "MEMORY");
+
+    if !in_memory {
+        options = options
+            // Mapping mémoire de 512 Mo pour les lectures.
+            .pragma("mmap_size", "536870912")
+            // Pages plus grandes : moins d'I/O sur SSD.
+            .page_size(8192)
+            // Récupère l'espace libéré par les purges.
+            .auto_vacuum(SqliteAutoVacuum::Incremental)
+            .pragma("wal_autocheckpoint", "1000");
+    }
+
+    let pool = SqlitePoolOptions::new()
+        .max_connections(MAX_CONNECTIONS)
+        // Pour une base en mémoire, garder au moins une connexion ouverte en permanence :
+        // SQLite détruit la base dès que la dernière connexion se referme.
+        .min_connections(if in_memory { 1 } else { 0 })
+        .connect_with(options)
         .await?;
-    // `synchronous = NORMAL` : Moins de `fsync` sur le disque, plus rapide mais avec un risque minime de corruption en cas de crash système.
-    sqlx::query("PRAGMA synchronous = NORMAL")
-        .execute(&pool)
-        .await?;
-    // `cache_size = -128000` : Alloue 128MB de RAM pour le cache de pages, réduisant les I/O disque.
-    sqlx::query("PRAGMA cache_size = -128000")
-        .execute(&pool)
-        .await?;
-    // `temp_store = MEMORY` : Utilise la RAM pour les tables temporaires.
-    sqlx::query("PRAGMA temp_store = MEMORY")
-        .execute(&pool)
-        .await?;
-    // `mmap_size` : Utilise le mapping mémoire pour accéder aux données, peut être plus rapide.
-    sqlx::query("PRAGMA mmap_size = 536870912")
-        .execute(&pool)
-        .await?;
-    // `page_size` : Augmente la taille des pages pour de meilleures performances sur les SSD.
-    sqlx::query("PRAGMA page_size = 8192")
-        .execute(&pool)
-        .await?;
-    // `auto_vacuum = INCREMENTAL` : Permet de récupérer l'espace non utilisé.
-    sqlx::query("PRAGMA auto_vacuum = INCREMENTAL")
-        .execute(&pool)
-        .await?;
-    // `busy_timeout` : Attend 5s si la base est verrouillée avant de retourner une erreur.
-    sqlx::query("PRAGMA busy_timeout = 5000")
-        .execute(&pool)
-        .await?;
-    // `wal_autocheckpoint` : Déclenche un checkpoint du WAL automatiquement.
-    sqlx::query("PRAGMA wal_autocheckpoint = 1000")
-        .execute(&pool)
-        .await?;
+
     // Force un checkpoint au démarrage pour nettoyer le fichier WAL.
     sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
         .execute(&pool)
@@ -133,6 +165,23 @@ pub async fn init_database(db_file: &str) -> Result<SqlitePool, Box<dyn std::err
         } else {
             info!("Migration {} already applied, skipping", migration.version);
         }
+    }
+
+    // Purge les abonnements laissés par le processus précédent.
+    // La table `subscriptions` reflète les clients *actuellement* connectés : les lignes sont
+    // supprimées à la déconnexion. Si le serveur s'arrête brutalement, personne ne les supprime, et
+    // au redémarrage `/graph/state` continue d'annoncer des consommateurs disparus depuis
+    // longtemps. Les sockets ne survivent pas au redémarrage, donc toute ligne présente ici au
+    // démarrage est par définition périmée.
+    let orphaned = sqlx::query("DELETE FROM subscriptions")
+        .execute(&pool)
+        .await?
+        .rows_affected();
+    if orphaned > 0 {
+        info!(
+            "Suppression de {} abonnement(s) orphelin(s) du démarrage précédent",
+            orphaned
+        );
     }
 
     // `ANALYZE` collecte des statistiques sur les tables et les index.

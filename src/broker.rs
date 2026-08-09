@@ -258,9 +258,13 @@ impl Broker {
 
         // Purge messages: keep only MAX_MESSAGES most recent AND remove anything older than MAX_AGE_HOURS
         // Purge les messages en gardant les `MAX_MESSAGES` plus récents et en supprimant tout ce qui est plus vieux que `MAX_AGE_HOURS`.
+        //
+        // On cible `rowid` et non `id` : la table `consumptions` (voir plus bas) n'a pas de colonne
+        // `id`, et `rowid` est disponible sur les deux tables. Pour `messages`, `id INTEGER PRIMARY
+        // KEY` est de toute façon un alias de `rowid`, donc le comportement est identique.
         match sqlx::query(
-            "DELETE FROM messages WHERE id NOT IN (
-                SELECT id FROM messages ORDER BY timestamp DESC LIMIT ?
+            "DELETE FROM messages WHERE rowid NOT IN (
+                SELECT rowid FROM messages ORDER BY timestamp DESC LIMIT ?
             ) OR timestamp < ?",
         )
         .bind(MAX_MESSAGES)
@@ -286,8 +290,8 @@ impl Broker {
         // Purge consumptions: keep only MAX_CONSUMPTIONS most recent AND remove anything older than MAX_AGE_HOURS
         // Fait de même pour les consommations.
         match sqlx::query(
-            "DELETE FROM consumptions WHERE id NOT IN (
-                SELECT id FROM consumptions ORDER BY timestamp DESC LIMIT ?
+            "DELETE FROM consumptions WHERE rowid NOT IN (
+                SELECT rowid FROM consumptions ORDER BY timestamp DESC LIMIT ?
             ) OR timestamp < ?",
         )
         .bind(MAX_CONSUMPTIONS)
@@ -509,25 +513,27 @@ impl Broker {
         match result {
             Ok(rows) => rows
                 .into_iter()
-                // `filter_map` est utilisé pour traiter les lignes et ignorer celles qui ont un JSON invalide.
-                .filter_map(|(topic, message_id, message_str, producer, timestamp)| {
+                // Un JSON illisible est remplacé par un objet d'erreur plutôt que supprimé :
+                // la ligne reste visible dans le dashboard au lieu de disparaître en silence.
+                // (`filter_map` retournait toujours `Some` — c'était un `map` déguisé.)
+                .map(|(topic, message_id, message_str, producer, timestamp)| {
                     let message = serde_json::from_str(&message_str).unwrap_or_else(
                         |_| serde_json::json!({"error": "Invalid JSON", "raw": message_str}),
                     );
 
-                    Some(MessageInfo {
+                    MessageInfo {
                         topic,
                         message_id,
                         message,
                         producer,
                         timestamp,
-                    })
+                    }
                 })
                 .collect(),
             Err(e) => {
                 // Retourne un vecteur vide en cas d'erreur.
                 error!("Erreur lors de la récupération des messages: {}", e);
-                Vec::with_capacity(0)
+                Vec::new()
             }
         }
     }
@@ -543,23 +549,23 @@ impl Broker {
         match result {
             Ok(rows) => rows
                 .into_iter()
-                .filter_map(|(consumer, topic, message_id, message_str, timestamp)| {
+                .map(|(consumer, topic, message_id, message_str, timestamp)| {
                     let message = serde_json::from_str(&message_str).unwrap_or_else(
                         |_| serde_json::json!({"error": "Invalid JSON", "raw": message_str}),
                     );
 
-                    Some(ConsumptionInfo {
+                    ConsumptionInfo {
                         consumer,
                         topic,
                         message_id,
                         message,
                         timestamp,
-                    })
+                    }
                 })
                 .collect(),
             Err(e) => {
                 error!("Erreur lors de la récupération des consommations: {}", e);
-                Vec::with_capacity(0)
+                Vec::new()
             }
         }
     }

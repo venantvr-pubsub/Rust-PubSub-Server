@@ -76,15 +76,23 @@ document.addEventListener("DOMContentLoaded", () => {
             const pathNode = baseLine.node();
             const pathLength = pathNode.getTotalLength();
 
-            // Animate the arrow traveling along the path
+            // A zero-length path (source and target at the same point) has no point to sample:
+            // getPointAtLength would be meaningless and the arrow invisible anyway.
+            if (!(pathLength > 0)) return arrowGroup;
+
+            // Animate the arrow traveling along the path.
             const animationDuration = 800; // 800ms for arrow to travel
-            const arrowLength = 500; // Length of the visible arrow segment
+            // Length of the visible arrow segment. This used to be a flat 500px - far longer than
+            // any chord of the layout circle - so the "travelling" arrow was really just a line
+            // growing out of the source node and never detached from it. Scale it to the path
+            // instead, with a floor so very short links stay visible.
+            const arrowLength = Math.max(24, pathLength * 0.25);
 
             function animateArrow() {
-                const startTime = Date.now();
+                const startTime = performance.now();
 
-                function frame() {
-                    const elapsed = Date.now() - startTime;
+                function frame(now) {
+                    const elapsed = now - startTime;
                     const progress = Math.min(elapsed / animationDuration, 1);
 
                     // Calculate current position along the path
@@ -114,12 +122,14 @@ document.addEventListener("DOMContentLoaded", () => {
         },
 
         tickHandler: (nodeGroup, linkGroup) => {
-            nodeGroup.selectAll('.node').attr("transform", d => `translate(${d.x},${d.y})`);
+            nodeGroup.selectAll('.node')
+                .attr("transform", d => `translate(${d.x || 0},${d.y || 0})`);
             // Update straight line paths at each tick
             linkGroup.selectAll('g').each(function (d) {
+                // Groups created outside drawLink carry no datum; skip them rather than throwing.
+                if (!d || !d.source || !d.target) return;
                 const group = d3.select(this);
-                const path = calculateStraightPath(d.source, d.target);
-                group.select('.base-line').attr("d", path);
+                group.select('.base-line').attr("d", calculateStraightPath(d.source, d.target));
                 // Note: animated arrow updates itself during animation
             });
         }

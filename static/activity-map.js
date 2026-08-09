@@ -1,189 +1,211 @@
 document.addEventListener("DOMContentLoaded", () => {
-    const socket = io();
-    const producersCol = document.getElementById('producers-col');
-    const topicsCol = document.getElementById('topics-col');
-    const consumersCol = document.getElementById('consumers-col');
+    const {trackConnection, fetchJson, setConnectionState} = window.DashboardUtils;
+
     const svg = document.getElementById('map-svg');
+    const SVG_NS = 'http://www.w3.org/2000/svg';
 
-    const nodes = new Set();
+    // Per-column node budget. The map used to append a <div> for every distinct name it ever saw
+    // and never removed one, so a long-running broker with rotating producer names grew the DOM
+    // without bound and pushed everything off-screen. Columns are now capped and scroll.
+    const MAX_NODES_PER_COLUMN = 60;
 
-    // Add "En attente..." placeholder to each column
-    const addPlaceholder = (column, type) => {
-        const placeholderId = `placeholder-${type}`;
-        const placeholder = document.createElement('div');
-        placeholder.id = placeholderId;
-        placeholder.className = 'placeholder-text';
-        placeholder.textContent = 'En attente...';
-        column.appendChild(placeholder);
+    // Cap on simultaneously animating arrows. Each arrow is an SVG element with a 1s lifetime; at
+    // a few thousand messages/second the browser spends all its time creating and destroying them.
+    const MAX_LIVE_ARROWS = 120;
+
+    const columns = {
+        producer: {el: document.getElementById('producers-col'), nodes: new Map()},
+        topic: {el: document.getElementById('topics-col'), nodes: new Map()},
+        consumer: {el: document.getElementById('consumers-col'), nodes: new Map()}
     };
 
-    // Remove placeholder when first node is added
-    const removePlaceholder = (column, type) => {
-        const placeholderId = `placeholder-${type}`;
-        const placeholder = document.getElementById(placeholderId);
-        if (placeholder) {
-            placeholder.remove();
+    let liveArrows = 0;
+
+    // --- Placeholders ------------------------------------------------------------------------
+    function syncPlaceholder(type) {
+        const column = columns[type];
+        const existing = column.el.querySelector('.placeholder-text');
+        if (column.nodes.size === 0) {
+            if (!existing) {
+                const placeholder = document.createElement('div');
+                placeholder.className = 'placeholder-text';
+                placeholder.textContent = 'En attente...';
+                column.el.appendChild(placeholder);
+            }
+        } else if (existing) {
+            existing.remove();
         }
-    };
+    }
 
-    // Initialize placeholders
-    addPlaceholder(producersCol, 'producer');
-    addPlaceholder(topicsCol, 'topic');
-    addPlaceholder(consumersCol, 'consumer');
-
+    // --- Nodes -------------------------------------------------------------------------------
     /**
-     * Draw a node in the specified column
-     * @param {string} name - Node name
-     * @param {string} type - Node type (producer/topic/consumer)
-     * @param {HTMLElement} column - Column element
-     * @returns {string} - Node ID
+     * Ensure a node exists in its column and return its element.
+     * Nodes are keyed in a Map (not looked up by DOM id) so that names containing characters that
+     * are awkward in selectors are handled, and so eviction is O(1).
      */
-    const drawNode = (name, type, column) => {
-        const nodeId = `node-${type}-${name}`;
-        if (!nodes.has(nodeId)) {
-            // Remove placeholder when adding first node
-            removePlaceholder(column, type);
+    function touchNode(name, type) {
+        if (typeof name !== 'string' || name === '') return null;
+        const column = columns[type];
+        if (!column) return null;
 
-            nodes.add(nodeId);
-            const nodeEl = document.createElement('div');
-            nodeEl.id = nodeId;
-            nodeEl.className = 'node';
-            nodeEl.textContent = name;
-            column.appendChild(nodeEl);
+        let el = column.nodes.get(name);
+        if (el) {
+            // Re-insert to move the entry to the most-recently-used end of the Map.
+            column.nodes.delete(name);
+            column.nodes.set(name, el);
+            return el;
         }
-        return nodeId;
-    };
 
-    /**
-     * Draw an arrow between two nodes
-     * @param {string} startId - Start node ID
-     * @param {string} endId - End node ID
-     * @param {string} arrowType - Arrow type (publish/consume)
-     */
-    const drawArrow = (startId, endId, arrowType = 'consume') => {
-        const startEl = document.getElementById(startId);
-        const endEl = document.getElementById(endId);
+        el = document.createElement('div');
+        el.className = 'node';
+        el.textContent = name;
+        el.title = name;
+        column.el.appendChild(el);
+        column.nodes.set(name, el);
+
+        // Evict the least recently active node once the column is full.
+        while (column.nodes.size > MAX_NODES_PER_COLUMN) {
+            const oldestKey = column.nodes.keys().next().value;
+            const oldest = column.nodes.get(oldestKey);
+            column.nodes.delete(oldestKey);
+            if (oldest) oldest.remove();
+        }
+
+        syncPlaceholder(type);
+        return el;
+    }
+
+    function removeNode(name, type) {
+        const column = columns[type];
+        if (!column) return;
+        const el = column.nodes.get(name);
+        if (!el) return;
+        column.nodes.delete(name);
+        el.remove();
+        syncPlaceholder(type);
+    }
+
+    function pulse(el) {
+        if (!el) return;
+        el.classList.remove('active');
+        // Force a reflow so the animation restarts when the same node fires twice in a row.
+        void el.offsetWidth;
+        el.classList.add('active');
+    }
+
+    // --- Arrows ------------------------------------------------------------------------------
+    function drawArrow(startEl, endEl, arrowType) {
         if (!startEl || !endEl) return;
+        if (liveArrows >= MAX_LIVE_ARROWS) return;
 
         const mapRect = svg.getBoundingClientRect();
         const startRect = startEl.getBoundingClientRect();
         const endRect = endEl.getBoundingClientRect();
 
-        const startX = startRect.right - mapRect.left;
-        const startY = startRect.top + startRect.height / 2 - mapRect.top;
-        const endX = endRect.left - mapRect.left;
-        const endY = endRect.top + endRect.height / 2 - mapRect.top;
+        // Skip arrows whose endpoints have scrolled out of the visible map area; drawing them
+        // produces stray lines pinned to the container edges.
+        if (startRect.bottom < mapRect.top || startRect.top > mapRect.bottom) return;
+        if (endRect.bottom < mapRect.top || endRect.top > mapRect.bottom) return;
 
-        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        line.setAttribute('x1', startX);
-        line.setAttribute('y1', startY);
-        line.setAttribute('x2', endX);
-        line.setAttribute('y2', endY);
+        const line = document.createElementNS(SVG_NS, 'line');
+        line.setAttribute('x1', String(startRect.right - mapRect.left));
+        line.setAttribute('y1', String(startRect.top + startRect.height / 2 - mapRect.top));
+        line.setAttribute('x2', String(endRect.left - mapRect.left));
+        line.setAttribute('y2', String(endRect.top + endRect.height / 2 - mapRect.top));
         line.setAttribute('class', `message-arrow ${arrowType}`);
-
-        // Add arrowhead marker based on type
         line.setAttribute('marker-end', `url(#arrowhead-${arrowType})`);
 
         svg.appendChild(line);
+        liveArrows++;
 
+        // `line.remove()` is a no-op if the node is already detached, unlike svg.removeChild(line)
+        // which throws NotFoundError.
         setTimeout(() => {
-            svg.removeChild(line);
-        }, 1000); // Remove after 1 second animation
-    };
+            line.remove();
+            liveArrows--;
+        }, 1000);
+    }
 
-    // Define arrowhead markers in SVG
-    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    // --- Arrowhead markers -------------------------------------------------------------------
+    function buildMarkers() {
+        const defs = document.createElementNS(SVG_NS, 'defs');
+        const markers = [
+            {id: 'arrowhead-publish', fill: '#22c55e'},
+            {id: 'arrowhead-consume', fill: '#ffab40'},
+            {id: 'arrowhead-consumed', fill: '#ef4444'}
+        ];
 
-    // Publish arrowhead (green)
-    const markerPublish = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
-    markerPublish.setAttribute('id', 'arrowhead-publish');
-    markerPublish.setAttribute('viewBox', '0 0 10 10');
-    markerPublish.setAttribute('refX', '8');
-    markerPublish.setAttribute('refY', '5');
-    markerPublish.setAttribute('markerWidth', '6');
-    markerPublish.setAttribute('markerHeight', '6');
-    markerPublish.setAttribute('orient', 'auto-start-reverse');
-    const pathPublish = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    pathPublish.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
-    pathPublish.setAttribute('fill', '#28a745');
-    markerPublish.appendChild(pathPublish);
-    defs.appendChild(markerPublish);
+        for (const {id, fill} of markers) {
+            const marker = document.createElementNS(SVG_NS, 'marker');
+            marker.setAttribute('id', id);
+            marker.setAttribute('viewBox', '0 0 10 10');
+            marker.setAttribute('refX', '8');
+            marker.setAttribute('refY', '5');
+            marker.setAttribute('markerWidth', '6');
+            marker.setAttribute('markerHeight', '6');
+            marker.setAttribute('orient', 'auto-start-reverse');
+            const path = document.createElementNS(SVG_NS, 'path');
+            path.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+            path.setAttribute('fill', fill);
+            marker.appendChild(path);
+            defs.appendChild(marker);
+        }
+        svg.appendChild(defs);
+    }
 
-    // Consume arrowhead (orange)
-    const markerConsume = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
-    markerConsume.setAttribute('id', 'arrowhead-consume');
-    markerConsume.setAttribute('viewBox', '0 0 10 10');
-    markerConsume.setAttribute('refX', '8');
-    markerConsume.setAttribute('refY', '5');
-    markerConsume.setAttribute('markerWidth', '6');
-    markerConsume.setAttribute('markerHeight', '6');
-    markerConsume.setAttribute('orient', 'auto-start-reverse');
-    const pathConsume = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    pathConsume.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
-    pathConsume.setAttribute('fill', '#ffab40');
-    markerConsume.appendChild(pathConsume);
-    defs.appendChild(markerConsume);
-
-    svg.appendChild(defs);
-
-    /**
-     * Initialize activity map with existing graph state
-     */
+    // --- Initial state -----------------------------------------------------------------------
     async function initializeActivityMap() {
         try {
-            const response = await fetch('/graph/state');
-            const state = await response.json();
-
-            console.log('Initial graph state:', state);
-
-            // Draw all existing producers, topics, and consumers
-            state.producers.forEach(producer => {
-                drawNode(producer, 'producer', producersCol);
-            });
-
-            state.topics.forEach(topic => {
-                drawNode(topic, 'topic', topicsCol);
-            });
-
-            state.consumers.forEach(consumer => {
-                drawNode(consumer, 'consumer', consumersCol);
-            });
-
-            console.log('Activity map initialized with existing data');
+            const state = await fetchJson('/graph/state');
+            // Defensive: a partial or errored response must not take the page down.
+            (state.producers || []).forEach(p => touchNode(p, 'producer'));
+            (state.topics || []).forEach(t => touchNode(t, 'topic'));
+            (state.consumers || []).forEach(c => touchNode(c, 'consumer'));
         } catch (error) {
             console.error('Failed to initialize activity map:', error);
+            setConnectionState('disconnected', 'état indisponible');
         }
     }
 
+    // --- Wiring ------------------------------------------------------------------------------
+    buildMarkers();
+    for (const type of Object.keys(columns)) syncPlaceholder(type);
+
+    const socket = trackConnection(io(), 'activity');
+
     socket.on('connect', () => {
-        console.log('Connected to activity stream.');
-        // Load initial state when connected
+        // Re-sync on every (re)connect: anything that happened while disconnected was missed.
         initializeActivityMap();
     });
 
     socket.on('new_message', (data) => {
-        console.log('New Message:', data);
-        const producerId = drawNode(data.producer, 'producer', producersCol);
-        const topicId = drawNode(data.topic, 'topic', topicsCol);
-        drawArrow(producerId, topicId, 'publish');
+        const producer = touchNode(data.producer, 'producer');
+        const topic = touchNode(data.topic, 'topic');
+        pulse(topic);
+        drawArrow(producer, topic, 'publish');
     });
 
     socket.on('new_consumption', (data) => {
-        console.log('New Consumption:', data);
-        const topicId = drawNode(data.topic, 'topic', topicsCol);
-        const consumerId = drawNode(data.consumer, 'consumer', consumersCol);
-        drawArrow(topicId, consumerId);
-    });
-
-    socket.on('new_client', (data) => {
-        // Pre-draw consumer nodes when they connect
-        drawNode(data.consumer, 'consumer', consumersCol);
+        const topic = touchNode(data.topic, 'topic');
+        const consumer = touchNode(data.consumer, 'consumer');
+        pulse(consumer);
+        drawArrow(topic, consumer, 'consume');
     });
 
     socket.on('consumed', (data) => {
-        console.log('Consumed:', data);
-        const topicId = drawNode(data.topic, 'topic', topicsCol);
-        const consumerId = drawNode(data.consumer, 'consumer', consumersCol);
-        drawArrow(topicId, consumerId, 'consume');
+        const topic = touchNode(data.topic, 'topic');
+        const consumer = touchNode(data.consumer, 'consumer');
+        pulse(consumer);
+        drawArrow(topic, consumer, 'consumed');
+    });
+
+    socket.on('new_client', (data) => {
+        touchNode(data.consumer, 'consumer');
+        touchNode(data.topic, 'topic');
+    });
+
+    // Drop consumers that go away, so the map reflects who is actually connected.
+    socket.on('client_disconnected', (data) => {
+        removeNode(data.consumer, 'consumer');
     });
 });

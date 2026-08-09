@@ -1,25 +1,39 @@
 /**
  * common-graph.js
- * This file contains the generic logic for creating an interactive D3 graph
- * updated via WebSockets. It is configurable for different types of layouts and renderings.
+ * Generic logic for an interactive D3 graph fed by the broker's Socket.IO event stream.
+ * Layout-specific behaviour (simulation, node placement, link drawing) comes from `config`.
  */
-
-// Export the main function to make it importable in other files.
-/* export */
 function createGraph(config) {
-    // --- Socket.io and D3 initialization ---
-    const socket = io();
+    const {trackConnection, fetchJson, setConnectionState} = window.DashboardUtils;
+
     const svg = d3.select(config.svgSelector);
-    const width = svg.node().getBoundingClientRect().width;
-    const height = svg.node().getBoundingClientRect().height;
+    const svgNode = svg.node();
     const radius = 20;
+
+    // Cap the graph size. Every distinct name the broker ever mentions used to become a permanent
+    // node, so a long-running server ended up with an unreadable hairball that also pegged the CPU
+    // in the force simulation.
+    const MAX_NODES = config.maxNodes || 80;
+
+    // Dimensions are re-read on resize. They used to be captured once at startup, so the layout
+    // stayed centred on the initial window size and drifted off-screen after any resize - and was
+    // computed as 0x0 entirely if the container had not been laid out yet.
+    let width = 0;
+    let height = 0;
+
+    function measure() {
+        const rect = svgNode.getBoundingClientRect();
+        width = rect.width || svgNode.clientWidth || 800;
+        height = rect.height || svgNode.clientHeight || 600;
+    }
+
+    measure();
 
     const g = svg.append("g");
     const linkGroup = g.append("g").attr("class", "links");
     const nodeGroup = g.append("g").attr("class", "nodes");
 
-    // --- Arrow (Markers) definition ---
-    // Configuration allows adjusting arrow tip position.
+    // --- Arrow markers -----------------------------------------------------------------------
     svg.append("defs").selectAll("marker")
         .data(["publish", "consume", "consumed"])
         .enter().append("marker")
@@ -32,68 +46,83 @@ function createGraph(config) {
         .attr("orient", config.arrow.orient)
         .append("path")
         .attr("d", "M0,-5L10,0L0,5")
-        .style("fill", d => d === 'publish' ? '#28a745' : d === 'consume' ? '#ffab40' : '#dc3545');
-    /* .style("fill", d => d === 'publish' ? '#28a745' : '#ffab40'); */
+        .style("fill", d => linkColor(d));
 
-    // --- Data and Simulation ---
-    let nodes = [];
-    const nodeMap = new Map();
-    // Simulation is created using the function provided in configuration.
-    const simulation = config.createSimulation(width, height);
-
-    // --- Common functions ---
-
-    function addOrUpdateNode(id, role) {
-        let node = nodeMap.get(id);
-        let isNewNode = false;
-        if (!node) {
-            node = {id, name: id, roles: [role]};
-            nodes.push(node);
-            nodeMap.set(id, node);
-            isNewNode = true;
-        } else if (!node.roles.includes(role)) {
-            node.roles.push(role);
-        }
-        return isNewNode;
+    function linkColor(type) {
+        if (type === 'publish') return '#28a745';
+        if (type === 'consume') return '#ffab40';
+        return '#dc3545';
     }
 
-    /* function drawTemporaryArrow(sourceId, targetId, type) {
-        const sourceNode = nodeMap.get(sourceId);
-        const targetNode = nodeMap.get(targetId);
-        if (!sourceNode || !targetNode) return;
+    // --- Data --------------------------------------------------------------------------------
+    let nodes = [];
+    const nodeMap = new Map();
+    const simulation = config.createSimulation(width, height);
 
-        // Calls the link drawing function provided by configuration.
-        const tempLink = config.drawLink(linkGroup, sourceNode, targetNode, type);
+    // Drag must be defined before updateGraph() can call it. It was previously declared with
+    // `const` further down the file, which worked only because of call ordering.
+    const drag = d3.drag()
+        .on("start", (event, d) => {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        })
+        .on("drag", (event, d) => {
+            d.fx = event.x;
+            d.fy = event.y;
+        })
+        .on("end", (event) => {
+            if (!event.active) simulation.alphaTarget(0);
+            // Deliberately keep fx/fy: this layout pins every node, so clearing them here made a
+            // dragged node snap to the centre and never return to the ring.
+        });
 
-        tempLink.transition()
-            .duration(2000)
-            .style("opacity", 0)
-            .remove();
-    } */
+    /**
+     * Insert or refresh a node. Returns true when the node set changed (i.e. a relayout is due).
+     */
+    function addOrUpdateNode(id, role) {
+        if (typeof id !== 'string' || id === '') return false;
+
+        const existing = nodeMap.get(id);
+        if (existing) {
+            existing.lastSeen = performance.now();
+            if (!existing.roles.includes(role)) {
+                existing.roles.push(role);
+                return true;
+            }
+            return false;
+        }
+
+        const node = {id, name: id, roles: [role], lastSeen: performance.now()};
+        nodes.push(node);
+        nodeMap.set(id, node);
+
+        // Evict the least recently active nodes once we exceed the budget.
+        if (nodes.length > MAX_NODES) {
+            nodes.sort((a, b) => b.lastSeen - a.lastSeen);
+            for (const dropped of nodes.splice(MAX_NODES)) {
+                nodeMap.delete(dropped.id);
+            }
+        }
+        return true;
+    }
 
     function drawTemporaryArrow(sourceId, targetId, type) {
         const sourceNode = nodeMap.get(sourceId);
         const targetNode = nodeMap.get(targetId);
         if (!sourceNode || !targetNode) return;
 
-        // --- ADDING BLINK EFFECT ---
-        // 1. Select the target node group (<g>) using its ID.
-        const targetNodeElement = nodeGroup.selectAll('.node')
-            .filter(d => d.id === targetId);
-
+        // Blink the destination so a burst is visible even when the arrow is short.
+        const targetNodeElement = nodeGroup.selectAll('.node').filter(d => d.id === targetId);
         if (!targetNodeElement.empty()) {
-            // 2. Add CSS class 'blink' to trigger the animation.
+            targetNodeElement.classed('blink', false);
+            // Force a reflow so the animation restarts on repeated hits.
+            void targetNodeElement.node().getBoundingClientRect();
             targetNodeElement.classed('blink', true);
-
-            // 3. Remove the class after 500ms so the effect can be replayed.
-            setTimeout(() => {
-                targetNodeElement.classed('blink', false);
-            }, 500);
+            setTimeout(() => targetNodeElement.classed('blink', false), 500);
         }
-        // --- END OF ADDITION ---
 
         const tempLink = config.drawLink(linkGroup, sourceNode, targetNode, type);
-
         tempLink.transition()
             .duration(2000)
             .style("opacity", 0)
@@ -107,92 +136,104 @@ function createGraph(config) {
                 enter => {
                     const nodeEnter = enter.append("g")
                         .attr("class", d => `node ${d.roles.join(' ')}`)
-                        .call(drag(simulation));
+                        .call(drag);
                     nodeEnter.append("circle").attr("r", radius);
-                    nodeEnter.append("text").attr("dy", ".35em").attr("y", radius + 15).text(d => d.name);
+                    nodeEnter.append("text")
+                        .attr("dy", ".35em")
+                        .attr("y", radius + 15)
+                        .text(d => d.name);
                     return nodeEnter;
                 },
-                update => update.attr("class", d => `node ${d.roles.join(' ')}`)
+                update => update.attr("class", d => `node ${d.roles.join(' ')}`),
+                // Evicted nodes were previously left in the DOM forever.
+                exit => exit.remove()
             );
 
         simulation.nodes(nodes);
+    }
+
+    function relayout() {
+        config.positionNodes(nodes, width, height);
+        updateGraph();
         simulation.alpha(0.3).restart();
     }
 
-    // The "tick" calls the specific tick function provided by configuration.
     simulation.on("tick", () => config.tickHandler(nodeGroup, linkGroup));
 
-    // --- Interactivity (Zoom and Drag) ---
-
-    const zoom = d3.zoom().on("zoom", (event) => g.attr("transform", event.transform));
+    // --- Zoom --------------------------------------------------------------------------------
+    const zoom = d3.zoom()
+        .scaleExtent([0.2, 5])
+        .on("zoom", (event) => g.attr("transform", event.transform));
     svg.call(zoom);
 
-    const drag = simulation => {
-        function dragstarted(event, d) {
-            if (!event.active) simulation.alphaTarget(0.3).restart();
-            d.fx = d.x;
-            d.fy = d.y;
-        }
-
-        function dragged(event, d) {
-            d.fx = event.x;
-            d.fy = event.y;
-        }
-
-        function dragended(event, d) {
-            if (!event.active) simulation.alphaTarget(0);
-            d.fx = null;
-            d.fy = null;
-        }
-
-        return d3.drag().on("start", dragstarted).on("drag", dragged).on("end", dragended);
+    // --- Resize ------------------------------------------------------------------------------
+    if (typeof ResizeObserver === 'function') {
+        let resizeTimer = null;
+        new ResizeObserver(() => {
+            // Coalesce: a window drag fires this continuously.
+            if (resizeTimer !== null) clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                resizeTimer = null;
+                measure();
+                const center = simulation.force("center");
+                if (center) center.x(width / 2).y(height / 2);
+                relayout();
+            }, 150);
+        }).observe(svgNode);
     }
 
-    // --- Initialization and WebSockets ---
-
+    // --- Initialization ----------------------------------------------------------------------
     async function initializeGraph() {
-        const response = await fetch('/graph/state');
-        const state = await response.json();
+        const state = await fetchJson('/graph/state');
 
-        // Remove loading text if present
         const loadingText = svg.select('#loading-text');
-        if (!loadingText.empty()) {
-            loadingText.remove();
-        }
+        if (!loadingText.empty()) loadingText.remove();
 
-        state.producers.forEach(p => addOrUpdateNode(p, 'producer'));
-        state.topics.forEach(t => addOrUpdateNode(t, 'topic'));
-        state.consumers.forEach(c => addOrUpdateNode(c, 'consumer'));
+        // Guard every field: a partial response used to throw inside the socket callback and
+        // leave the page stuck on "En attente de données...".
+        (state.producers || []).forEach(p => addOrUpdateNode(p, 'producer'));
+        (state.topics || []).forEach(t => addOrUpdateNode(t, 'topic'));
+        (state.consumers || []).forEach(c => addOrUpdateNode(c, 'consumer'));
 
-        // Calls the node positioning function from configuration.
-        config.positionNodes(nodes, width, height);
-        updateGraph();
+        measure();
+        relayout();
     }
 
-    function handleWebSocketEvent(data) {
+    function handleEvent(data, type) {
         const {producer, topic, consumer} = data;
-        let needsReposition = false;
+        let changed = false;
 
-        if (producer) needsReposition = addOrUpdateNode(producer, 'producer') || needsReposition;
-        if (topic) needsReposition = addOrUpdateNode(topic, 'topic') || needsReposition;
-        if (consumer) needsReposition = addOrUpdateNode(consumer, 'consumer') || needsReposition;
+        if (producer) changed = addOrUpdateNode(producer, 'producer') || changed;
+        if (topic) changed = addOrUpdateNode(topic, 'topic') || changed;
+        if (consumer) changed = addOrUpdateNode(consumer, 'consumer') || changed;
 
-        if (data.type === 'publish') drawTemporaryArrow(producer, topic, 'publish');
-        if (data.type === 'consume') drawTemporaryArrow(topic, consumer, 'consume');
-        if (data.type === 'consumed') drawTemporaryArrow(topic, consumer, 'consumed');
+        // Only relayout when the node set actually changed. The previous code restarted the force
+        // simulation on every single event, which kept the CPU busy under load for no visual gain.
+        if (changed) relayout();
 
-        if (needsReposition) {
-            config.positionNodes(nodes, width, height);
-        }
-        updateGraph();
+        if (type === 'publish') drawTemporaryArrow(producer, topic, 'publish');
+        else if (type === 'consume') drawTemporaryArrow(topic, consumer, 'consume');
+        else if (type === 'consumed') drawTemporaryArrow(topic, consumer, 'consumed');
     }
 
-    socket.on('connect', () => console.log('Connected to activity stream.'));
-    socket.on('new_message', (data) => handleWebSocketEvent({...data, type: 'publish'}));
-    socket.on('new_consumption', (data) => handleWebSocketEvent({...data, type: 'consume'}));
-    socket.on('new_client', (data) => handleWebSocketEvent({...data, type: 'consume'})); // Treated as new_consumption
-    socket.on('consumed', (data) => handleWebSocketEvent({...data, type: 'consumed'}));
+    function loadState() {
+        initializeGraph().catch(err => {
+            console.error('Failed to initialize graph:', err);
+            setConnectionState('disconnected', 'état indisponible');
+        });
+    }
 
-    // Launch initialization
-    initializeGraph().catch(err => console.error('Failed to initialize graph:', err));
+    const socket = trackConnection(io(), 'graph');
+
+    // Re-sync on every (re)connect, and once up front so the graph still renders the current
+    // state if the socket never comes up.
+    socket.on('connect', loadState);
+    loadState();
+
+    socket.on('new_message', (data) => handleEvent(data, 'publish'));
+    socket.on('new_consumption', (data) => handleEvent(data, 'consume'));
+    socket.on('consumed', (data) => handleEvent(data, 'consumed'));
+    // A client connecting is not a consumption: register the nodes but do not draw a delivery
+    // arrow for it, which is what the old `new_client -> consume` mapping did.
+    socket.on('new_client', (data) => handleEvent(data, 'connect'));
 }

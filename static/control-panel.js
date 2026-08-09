@@ -1,16 +1,25 @@
 document.addEventListener("DOMContentLoaded", () => {
-    const MAX_LIST_SIZE = 100; // Limite globale pour toutes les listes
+    const {
+        formatTimestamp, formatPayload, renderRows, renderNotice,
+        coalesce, trackConnection, fetchJson
+    } = window.DashboardUtils;
 
-    // Generate a UUID v4 for message IDs
+    // Generate a UUID v4 for message IDs.
+    // crypto.randomUUID is available on every browser that supports the rest of this page; the
+    // Math.random fallback exists only for non-secure-context origins (plain http on a LAN IP),
+    // where crypto.randomUUID is not exposed.
     function uuidv4() {
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-            let r = Math.random() * 16 | 0,
-                v = c === 'x' ? r : (r & 0x3 | 0x8);
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+            return window.crypto.randomUUID();
+        }
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
             return v.toString(16);
         });
     }
 
-    // Base message class for structuring messages
+    // Base message class for structuring messages.
     class BaseMessage {
         constructor(producer, payload, message_id = null) {
             this.message_id = message_id || uuidv4();
@@ -28,18 +37,123 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // Specific business class for text messages
+    // Specific business class for text messages.
     class TextMessage extends BaseMessage {
         constructor(text, producer, message_id) {
             super(producer, {text: text}, message_id);
         }
     }
 
-    let socket;
+    // --- Table definitions -------------------------------------------------------------------
+    // One entry per tab. `cells` are plain accessors; DashboardUtils.renderRows writes them with
+    // textContent, so nothing here can inject markup.
+    const TABLES = {
+        clients: {
+            target: '#clients',
+            tbody: document.querySelector('#clientsTable tbody'),
+            url: '/clients',
+            empty: 'Aucun client connecté',
+            cells: [
+                c => c.consumer,
+                c => c.topic,
+                c => formatTimestamp(c.connected_at)
+            ]
+        },
+        messages: {
+            target: '#messages',
+            tbody: document.querySelector('#messagesTable tbody'),
+            url: '/messages',
+            empty: 'Aucun message publié',
+            cells: [
+                m => m.producer,
+                m => m.topic,
+                m => m.message_id,
+                m => formatPayload(m.message),
+                m => formatTimestamp(m.timestamp)
+            ]
+        },
+        consumptions: {
+            target: '#consumptions',
+            tbody: document.querySelector('#consTable tbody'),
+            url: '/consumptions',
+            empty: 'Aucune consommation enregistrée',
+            cells: [
+                c => c.consumer,
+                c => c.topic,
+                c => c.message_id,
+                c => formatPayload(c.message),
+                c => formatTimestamp(c.timestamp)
+            ]
+        }
+    };
 
-    // Handle connect and subscribe button click
-    document.getElementById("connectBtn").addEventListener("click", () => {
-        const consumer = document.getElementById("consumer").value;
+    // The tab that is currently visible. Only that table is fetched on an incoming event; the
+    // others are marked stale and refreshed when the user switches to them. Previously all three
+    // tables were re-fetched on every single event, including the two nobody was looking at.
+    let activeTable = 'clients';
+    const stale = new Set();
+
+    async function load(key) {
+        const table = TABLES[key];
+        if (!table || !table.tbody) return;
+        try {
+            const rows = await fetchJson(table.url);
+            // Only clear the body once the data has arrived. The old code emptied it first, which
+            // made every refresh flash "En attente..." even though data was already on screen.
+            renderRows(table.tbody, rows, table.cells, table.empty);
+            stale.delete(key);
+        } catch (error) {
+            console.error(`Error fetching ${table.url}:`, error);
+            renderNotice(table.tbody, table.cells.length, 'Erreur de chargement', 'text-danger');
+        }
+    }
+
+    // One coalescing refresher per table: an event burst collapses into a single fetch.
+    const refresh = {};
+    for (const key of Object.keys(TABLES)) {
+        refresh[key] = coalesce(() => load(key), 250);
+    }
+
+    function invalidate(key) {
+        if (key === activeTable) {
+            refresh[key]();
+        } else {
+            stale.add(key);
+        }
+    }
+
+    // --- Live event stream -------------------------------------------------------------------
+    // This socket exists purely to observe the broker. It is created once, on page load, so the
+    // tables are populated and stay live even if the user never touches "Connect & Subscribe".
+    // Previously every socket handler lived inside the Connect click handler, so a freshly opened
+    // Control Panel showed three empty tables until you clicked the button.
+    const monitorSocket = trackConnection(io(), 'monitor');
+
+    monitorSocket.on('connect', () => {
+        // Refresh on (re)connect: events that fired while we were disconnected were missed.
+        for (const key of Object.keys(TABLES)) {
+            if (key === activeTable) refresh[key].now();
+            else stale.add(key);
+        }
+    });
+
+    monitorSocket.on('new_message', () => invalidate('messages'));
+    monitorSocket.on('new_client', () => invalidate('clients'));
+    monitorSocket.on('client_disconnected', () => invalidate('clients'));
+    monitorSocket.on('new_consumption', () => invalidate('consumptions'));
+    monitorSocket.on('consumed', () => invalidate('consumptions'));
+
+    // --- Test consumer -----------------------------------------------------------------------
+    // A second, independent connection used to exercise the broker from the browser.
+    // It must NOT reuse the monitor socket: io() with the same URL returns the cached manager, so
+    // repeatedly calling io() stacked a new set of listeners on one socket and every event ended
+    // up handled N times. forceNew gives this button its own connection, which we tear down
+    // explicitly before opening another.
+    let consumerSocket = null;
+    const connectBtn = document.getElementById("connectBtn");
+
+    connectBtn.addEventListener("click", () => {
+        const consumer = document.getElementById("consumer").value.trim();
         const topics = document.getElementById("topics").value
             .split(",").map(s => s.trim()).filter(s => s);
 
@@ -48,169 +162,101 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        console.log(`Connecting as ${consumer} to topics: ${topics}`);
-
-        // If a socket already exists and is connected, disconnect first
-        if (socket && socket.connected) {
-            console.log("Disconnecting existing socket before new connection.");
-            socket.disconnect();
+        if (consumerSocket) {
+            consumerSocket.removeAllListeners();
+            consumerSocket.disconnect();
+            consumerSocket = null;
         }
 
-        socket = io({
+        console.log(`Connecting as ${consumer} to topics: ${topics.join(', ')}`);
+
+        consumerSocket = io({
+            forceNew: true,
             reconnection: true,
             reconnectionAttempts: Infinity,
             reconnectionDelay: 2000
         });
 
-        socket.on("connect", () => {
-            console.log("Connected to server.");
-            socket.emit("subscribe", {consumer, topics});
-            console.log(`Subscribed to topics: ${topics}`);
-            // Refresh admin tables on successful connection
-            refreshMessages();
-            refreshClients();
-            refreshConsumptions();
+        consumerSocket.on("connect", () => {
+            console.log(`Test consumer connected, subscribing to: ${topics.join(', ')}`);
+            consumerSocket.emit("subscribe", {consumer, topics});
         });
 
-        socket.on("message", (data) => {
-            console.log(`Message received: ${JSON.stringify(data)}`);
-            // Message received - no UI display needed (removed Received Messages tab)
+        consumerSocket.on("message", (data) => {
+            // Received by this browser as a subscriber. The tables are fed by the monitor socket,
+            // so there is nothing to render here.
+            console.log('Message received:', data);
         });
 
-        socket.on("disconnect", () => console.log("Disconnected from server."));
-        socket.on("new_message", () => refreshMessages());
-        socket.on("new_client", () => refreshClients());
-        socket.on("client_disconnected", () => refreshClients());
-        socket.on("new_consumption", () => refreshConsumptions());
-        socket.on("consumed", (data) => {
-            console.log(`Consumed by handler: ${data.consumer} - Topic: ${data.topic} - Message ID: ${data.message_id}`);
-            refreshConsumptions();
+        consumerSocket.on("disconnect", (reason) => {
+            console.log(`Test consumer disconnected: ${reason}`);
+        });
+
+        consumerSocket.on("connect_error", (error) => {
+            console.error('Test consumer connection error:', error);
         });
     });
 
-    document.getElementById("pubBtn").addEventListener("click", () => {
-        const topic = document.getElementById("pubTopic").value;
+    // --- Publishing --------------------------------------------------------------------------
+    const pubBtn = document.getElementById("pubBtn");
+
+    pubBtn.addEventListener("click", async () => {
+        const topic = document.getElementById("pubTopic").value.trim();
         const messageText = document.getElementById("pubMessage").value;
-        const producer = document.getElementById("pubProducer").value || "frontend_publisher";
+        const producer = document.getElementById("pubProducer").value.trim() || "frontend_publisher";
 
         if (!topic || !messageText) {
             alert("Please enter a topic and a message to publish.");
             return;
         }
 
-        const msg = new TextMessage(messageText, producer, uuidv4());
-        const payload = msg.toPayload(topic);
+        const payload = new TextMessage(messageText, producer, uuidv4()).toPayload(topic);
 
-        fetch("/publish", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify(payload)
-        })
-            .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(new Error(e.message))))
-            .then(data => {
-                console.log(`Publish response: ${JSON.stringify(data)}`);
-                document.getElementById("pubMessage").value = "";
-            })
-            .catch(err => {
-                console.error(`Publish error: ${err}`);
-                alert(`Failed to publish message: ${err.message}`);
+        pubBtn.disabled = true;
+        try {
+            const response = await fetch("/publish", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(payload)
             });
+
+            if (!response.ok) {
+                // The server may answer with a JSON body or with nothing at all. Blindly calling
+                // response.json() on an empty body throws a SyntaxError, which used to surface to
+                // the user as "Unexpected end of JSON input" instead of the actual failure.
+                let detail = `HTTP ${response.status}`;
+                try {
+                    const body = await response.json();
+                    if (body && body.message) detail = body.message;
+                } catch (_) { /* no JSON body - keep the status line */ }
+                throw new Error(detail);
+            }
+
+            document.getElementById("pubMessage").value = "";
+            // The broadcast event will also trigger a refresh, but firing one here means the row
+            // shows up even if this browser is not receiving events for some reason.
+            invalidate('messages');
+        } catch (error) {
+            console.error('Publish error:', error);
+            alert(`Failed to publish message: ${error.message}`);
+        } finally {
+            pubBtn.disabled = false;
+        }
     });
 
-    // Helper function to format timestamp
-    function formatTimestamp(unixTimestamp) {
-        if (!unixTimestamp) return '';
-        return new Date(unixTimestamp * 1000).toLocaleString();
-    }
-
-    // Refresh the clients table
-    function refreshClients() {
-        console.log("Refreshing clients list");
-        const tbody = document.querySelector("#clientsTable tbody");
-        tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">En attente...</td></tr>';
-
-        fetch("/clients")
-            .then(r => r.json())
-            .then(clients => {
-                tbody.innerHTML = "";
-                if (clients.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">Aucun client connecté</td></tr>';
-                } else {
-                    // --- ADDITION: Limit number of displayed clients ---
-                    clients.slice(0, MAX_LIST_SIZE).forEach(c => {
-                        const tr = document.createElement("tr");
-                        tr.innerHTML = `<td>${c.consumer}</td><td>${c.topic}</td><td>${formatTimestamp(c.connected_at)}</td>`;
-                        tbody.appendChild(tr);
-                    });
-                }
-            })
-            .catch(err => {
-                console.error(`Error fetching clients: ${err}`);
-                tbody.innerHTML = '<tr><td colspan="3" class="text-center text-danger">Erreur de chargement</td></tr>';
-            });
-    }
-
-    // Refresh the messages table
-    function refreshMessages() {
-        console.log("Refreshing published messages list");
-        const tbody = document.querySelector("#messagesTable tbody");
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">En attente...</td></tr>';
-
-        fetch("/messages")
-            .then(r => r.json())
-            .then(messages => {
-                tbody.innerHTML = "";
-                if (messages.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Aucun message publié</td></tr>';
-                } else {
-                    // --- ADDITION: Limit number of displayed messages ---
-                    messages.slice(0, MAX_LIST_SIZE).forEach(m => {
-                        const tr = document.createElement("tr");
-                        tr.innerHTML = `<td>${m.producer}</td><td>${m.topic}</td><td>${JSON.stringify(m.message)}</td><td>${formatTimestamp(m.timestamp)}</td>`;
-                        tbody.appendChild(tr);
-                    });
-                    console.log(`Published messages list updated with ${messages.length} messages`);
-                }
-            })
-            .catch(err => {
-                console.error(`Error fetching messages: ${err}`);
-                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger">Erreur de chargement</td></tr>';
-            });
-    }
-
-    // Refresh the consumptions table
-    function refreshConsumptions() {
-        console.log("Refreshing consumptions list");
-        const tbody = document.querySelector("#consTable tbody");
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">En attente...</td></tr>';
-
-        fetch("/consumptions")
-            .then(r => r.json())
-            .then(consumptions => {
-                tbody.innerHTML = "";
-                if (consumptions.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Aucune consommation enregistrée</td></tr>';
-                } else {
-                    // --- AJOUT : Limiter le nombre de consommations affichées ---
-                    consumptions.slice(0, MAX_LIST_SIZE).forEach(c => {
-                        const tr = document.createElement("tr");
-                        tr.innerHTML = `<td>${c.consumer}</td><td>${c.topic}</td><td>${JSON.stringify(c.message)}</td><td>${formatTimestamp(c.timestamp)}</td>`;
-                        tbody.appendChild(tr);
-                    });
-                    console.log(`Consumptions list updated with ${consumptions.length} consumptions`);
-                }
-            })
-            .catch(err => {
-                console.error(`Error fetching consumptions: ${err}`);
-                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger">Erreur de chargement</td></tr>';
-            });
-    }
-
-    // Refresh tab content when switching tabs
-    document.getElementById('pubSubTabs').addEventListener('shown.bs.tab', function (event) {
-        const targetTab = event.target.getAttribute('data-bs-target');
-        if (targetTab === '#clients') refreshClients();
-        else if (targetTab === '#messages') refreshMessages();
-        else if (targetTab === '#consumptions') refreshConsumptions();
+    // --- Tabs --------------------------------------------------------------------------------
+    document.getElementById('pubSubTabs').addEventListener('shown.bs.tab', (event) => {
+        const target = event.target.getAttribute('data-bs-target');
+        const entry = Object.entries(TABLES).find(([, table]) => table.target === target);
+        if (!entry) return;
+        const [key] = entry;
+        activeTable = key;
+        if (stale.has(key)) refresh[key].now();
     });
+
+    // Initial load: the visible tab immediately, the others marked stale.
+    for (const key of Object.keys(TABLES)) {
+        if (key === activeTable) refresh[key].now();
+        else stale.add(key);
+    }
 });
