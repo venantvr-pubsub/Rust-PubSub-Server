@@ -7,6 +7,17 @@
     --text-muted-color: #a1a1aa;
     --border-color: rgba(255, 255, 255, 0.1);
     --success-color: #22c55e;
+
+    /* --- Couleurs sémantiques des visualisations : SOURCE UNIQUE ---
+       Consommées par la légende (ci-dessous), par les nœuds du graphe circulaire
+       (circular-graph.css) et par les balles traçantes (tracer.js, qui les lit via
+       getComputedStyle). Modifier ici suffit ; ne jamais redéfinir ces teintes ailleurs. */
+    --couleur-publication: #22c55e;   /* producteur -> topic */
+    --couleur-livraison: #ffab40;     /* topic -> consommateur */
+    --couleur-accuse: #ef4444;        /* accusé de consommation */
+    --couleur-producteur: #007bff;
+    --couleur-topic: #6c757d;
+    --couleur-consommateur: #dc3545;
 }
 
 html, body {
@@ -79,11 +90,9 @@ main {
     flex-shrink: 0;
 }
 
-/* Ces couleurs doivent rester alignées sur circular-graph.css (.node.* circle)
-   et sur couleurLien() dans common-graph.js. */
-.legend-dot.producer { background-color: #007bff; }
-.legend-dot.topic { background-color: #6c757d; }
-.legend-dot.consumer { background-color: #dc3545; }
+.legend-dot.producer { background-color: var(--couleur-producteur); }
+.legend-dot.topic { background-color: var(--couleur-topic); }
+.legend-dot.consumer { background-color: var(--couleur-consommateur); }
 
 .legend-line {
     width: 22px;
@@ -92,9 +101,9 @@ main {
     flex-shrink: 0;
 }
 
-.legend-line.publish { border-color: #22c55e; }
-.legend-line.consume { border-color: #ffab40; }
-.legend-line.consumed { border-color: #ef4444; }
+.legend-line.publish { border-color: var(--couleur-publication); }
+.legend-line.consume { border-color: var(--couleur-livraison); }
+.legend-line.consumed { border-color: var(--couleur-accuse); }
 
 /* --- Indicateur de connexion (piloté par DashboardUtils.setConnectionState) --- */
 .connection-status {
@@ -114,13 +123,13 @@ main {
 }
 
 .connection-status[data-state="connecting"] {
-    color: #ffab40;
+    color: var(--couleur-livraison);
     background-color: rgba(255, 171, 64, 0.12);
     border-color: rgba(255, 171, 64, 0.4);
 }
 
 .connection-status[data-state="disconnected"] {
-    color: #ef4444;
+    color: var(--couleur-accuse);
     background-color: rgba(239, 68, 68, 0.12);
     border-color: rgba(239, 68, 68, 0.4);
 }

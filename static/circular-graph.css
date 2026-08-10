@@ -10,39 +10,23 @@
     font-style: italic;
 }
 
-.link {
-    stroke-opacity: 0.8;
-    stroke-width: 3px;
-    fill: none;
-}
-
-.link.publish {
-    stroke: #28a745;
-}
-
-.link.consume {
-    stroke: #ffab40;
-}
-
-.link.consumed {
-    stroke: #ef4444;
-}
-
 .node circle {
     stroke: #fff;
     stroke-width: 2px;
 }
 
+/* Les couleurs des rôles viennent de style.css (:root), source unique partagée avec la
+   légende et les balles traçantes. */
 .node.producer circle {
-    fill: #007bff;
+    fill: var(--couleur-producteur);
 }
 
 .node.topic circle {
-    fill: #6c757d;
+    fill: var(--couleur-topic);
 }
 
 .node.consumer circle {
-    fill: #dc3545;
+    fill: var(--couleur-consommateur);
 }
 
 .node text {

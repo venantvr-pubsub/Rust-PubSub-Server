@@ -99,6 +99,10 @@ sequenceDiagram
 - **`table` du dashboard = source serveur.** Le socket « moniteur » et le socket
   « consommateur de test » sont deux connexions distinctes (`forceNew`) ; ne pas les fusionner,
   `io()` renvoie sinon le socket en cache et empile les gestionnaires.
+- **Les couleurs sémantiques des visualisations ont une source unique** : les variables
+  `--couleur-*` de `static/style.css` (`:root`). La légende et les nœuds du graphe circulaire
+  les consomment en CSS, `tracer.js` les lit via `getComputedStyle`. Ne jamais redéfinir ces
+  teintes en dur ailleurs.
 
 ## Commandes
 

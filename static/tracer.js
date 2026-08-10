@@ -19,11 +19,19 @@
 
     const NS = 'http://www.w3.org/2000/svg';
 
-    // Ces couleurs doivent rester alignées sur la légende (style.css, .legend-line).
+    // Les couleurs viennent des variables CSS de style.css (:root), source unique partagée avec
+    // la légende et les nœuds du graphe circulaire. La lecture au chargement du module est sûre :
+    // ce script est placé en fin de <body> et les feuilles de style du <head>, déjà chargées,
+    // bloquent de toute façon son exécution. Les valeurs en dur ne sont que des filets de
+    // sécurité si une variable disparaissait de style.css.
+    const stylesRacine = global.getComputedStyle(document.documentElement);
+    const lireCouleur = (variable, defaut) =>
+        (stylesRacine.getPropertyValue(variable) || '').trim() || defaut;
+
     const COULEURS = {
-        publish: '#22c55e',
-        consume: '#ffab40',
-        consumed: '#ef4444'
+        publish: lireCouleur('--couleur-publication', '#22c55e'),
+        consume: lireCouleur('--couleur-livraison', '#ffab40'),
+        consumed: lireCouleur('--couleur-accuse', '#ef4444')
     };
 
     // Épaisseurs superposées composant la traînée : la plus large et la plus diffuse porte la
