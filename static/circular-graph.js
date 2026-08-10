@@ -164,14 +164,15 @@ document.addEventListener("DOMContentLoaded", () => {
             });
         },
 
-        drawLink: (groupeLiens, noeudSource, noeudCible, type, noeuds) => {
+        drawLink: (groupeLiens, noeudSource, noeudCible, type, noeuds, onFin) => {
             const parcours = calculerParcours(noeudSource, noeudCible, noeuds || []);
             const chemin = cheminAdouci(parcours, CONGE);
             if (!chemin) return d3.select(null);
 
             // La balle traçante suit le parcours puis se retire d'elle-même. On l'injecte dans le
             // groupe des liens pour qu'elle hérite des transformations de zoom et de panoramique.
-            const tir = window.Tracer.tirerSurChemin(groupeLiens.node(), chemin, type);
+            // `onFin` — fourni par common-graph.js — rend le jeton du plafond de tirs simultanés.
+            const tir = window.Tracer.tirerSurChemin(groupeLiens.node(), chemin, type, {onFin});
 
             // `common-graph.js` attend une sélection D3 ; une sélection vide absorbe sans effet
             // les appels lorsqu'aucun élément n'a pu être créé.

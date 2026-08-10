@@ -99,6 +99,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- Flèches -----------------------------------------------------------------------------
     function dessinerFleche(elDepart, elArrivee, typeFleche) {
         if (!elDepart || !elArrivee) return;
+        // Onglet en arrière-plan : `requestAnimationFrame` est gelé, chaque tir resterait figé
+        // dans le DOM jusqu'au retour sur l'onglet. Personne ne regarde — on ne tire pas.
+        if (document.hidden) return;
         if (flechesVivantes >= MAX_FLECHES_VIVANTES) return;
 
         const rectCarte = svg.getBoundingClientRect();

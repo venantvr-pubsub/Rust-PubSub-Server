@@ -91,10 +91,22 @@ function createGraph(config) {
         return true;
     }
 
+    // Plafond de balles traçantes simultanées. Chaque balle anime sa propre boucle
+    // `requestAnimationFrame` : sans plafond, une rafale soutenue en accumule des centaines et
+    // le rendu s'écroule. Même rôle que MAX_FLECHES_VIVANTES sur la carte d'activité.
+    const MAX_TIRS_VIVANTS = 120;
+    let tirsVivants = 0;
+
     function dessinerFlecheTemporaire(idSource, idCible, type) {
         const noeudSource = indexNoeuds.get(idSource);
         const noeudCible = indexNoeuds.get(idCible);
         if (!noeudSource || !noeudCible) return;
+
+        // Onglet en arrière-plan : `requestAnimationFrame` est gelé, mais les événements socket
+        // continuent d'arriver. Chaque tir créerait un groupe SVG figé qui ne se retirerait qu'au
+        // retour sur l'onglet — autant ne rien tirer, personne ne regarde.
+        if (document.hidden) return;
+        if (tirsVivants >= MAX_TIRS_VIVANTS) return;
 
         // Fait clignoter la destination pour qu'une rafale reste visible même lorsque la flèche
         // est courte.
@@ -111,8 +123,13 @@ function createGraph(config) {
         // `drawLink` produit une balle traçante qui s'anime, marque l'impact puis se retire
         // toute seule : aucune transition de disparition à superposer ici.
         // La liste complète des nœuds lui est transmise afin qu'elle puisse router le chemin en
-        // contournant ceux qui barrent la route.
-        config.drawLink(groupeLiens, noeudSource, noeudCible, type, noeuds);
+        // contournant ceux qui barrent la route ; `onFin` rend le jeton du plafond.
+        tirsVivants++;
+        const tir = config.drawLink(groupeLiens, noeudSource, noeudCible, type, noeuds,
+            () => { tirsVivants--; });
+
+        // Sélection vide : aucun élément créé (trajet dégénéré), le jeton est rendu tout de suite.
+        if (!tir || tir.empty()) tirsVivants--;
     }
 
     function mettreAJourGraphe() {

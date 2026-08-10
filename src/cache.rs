@@ -3,6 +3,10 @@ use crate::models::{ConsumptionInfo, GraphState, MessageInfo};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+// Une entrée de cache : la donnée accompagnée de son instant de création, `None` si vide.
+// L'alias sert aussi de signature commune à `get_or_fetch_cached` (handlers.rs).
+pub type CacheEntry<T> = Arc<RwLock<Option<(T, std::time::Instant)>>>;
+
 // La structure `QueryCache` est conçue pour stocker en mémoire les résultats de requêtes coûteuses,
 // afin de réduire la charge sur la base de données et d'accélérer les réponses.
 // C'est un exemple du pattern "cache-aside".
@@ -16,11 +20,11 @@ pub struct QueryCache {
     // `None` signifie que le cache est vide ou invalide pour cette donnée.
 
     // Cache pour la liste des messages.
-    pub messages: Arc<RwLock<Option<(Vec<MessageInfo>, std::time::Instant)>>>,
+    pub messages: CacheEntry<Vec<MessageInfo>>,
     // Cache pour la liste des consommations.
-    pub consumptions: Arc<RwLock<Option<(Vec<ConsumptionInfo>, std::time::Instant)>>>,
+    pub consumptions: CacheEntry<Vec<ConsumptionInfo>>,
     // Cache pour l'état du graphe de dépendances.
-    pub graph_state: Arc<RwLock<Option<(GraphState, std::time::Instant)>>>,
+    pub graph_state: CacheEntry<GraphState>,
 
     // `ttl` (Time-To-Live): Durée de validité d'une entrée dans le cache.
     // Après cette durée, l'entrée est considérée comme expirée et devra être rafraîchie.

@@ -5,16 +5,15 @@ use crate::models::{
 };
 use axum::{extract::State, http::StatusCode, Json};
 use socketioxide::SocketIo;
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::atomic::Ordering;
 use std::time::SystemTime;
-use tokio::sync::RwLock;
 use tracing::info;
 
 // --- Fonction générique de mise en cache (Cache-Aside Pattern) ---
 // Cette fonction est une abstraction puissante pour gérer la logique de cache.
 async fn get_or_fetch_cached<T, F, Fut>(
     // Le champ de cache spécifique à utiliser (ex: `state.cache.messages`).
-    cache: &Arc<RwLock<Option<(T, std::time::Instant)>>>,
+    cache: &crate::cache::CacheEntry<T>,
     // La durée de vie (TTL) du cache.
     ttl: std::time::Duration,
     // Une fonction (closure) qui sera appelée pour récupérer les données fraîches si le cache est vide ou expiré.

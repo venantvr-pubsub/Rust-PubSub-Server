@@ -58,6 +58,9 @@ const MAX_AGE_HOURS: f64 = 24.0;
 // Intervalle en minutes entre chaque purge.
 const PURGE_INTERVAL_MINUTES: u64 = 30;
 
+// Détail d'un abonné en mémoire : (nom du consommateur, sujets suivis, instant de connexion).
+type SubscriptionEntry = (String, Vec<String>, f64);
+
 // Le `Broker` est le cœur de l'application, gérant l'état, les messages et les clients.
 pub struct Broker {
     // Pool de connexions à la base de données pour les lectures.
@@ -69,7 +72,7 @@ pub struct Broker {
     // `Arc` permet le partage entre threads.
     // `RwLock` permet de multiples lectures simultanées, ce qui est fréquent,
     // et une seule écriture, ce qui est moins fréquent. C'est plus performant qu'un `Mutex` ici.
-    subscriptions: Arc<RwLock<HashMap<String, (String, Vec<String>, f64)>>>,
+    subscriptions: Arc<RwLock<HashMap<String, SubscriptionEntry>>>,
     // Canal pour envoyer des commandes d'écriture à la base de données.
     db_tx: mpsc::UnboundedSender<DbCommand>,
 }
@@ -476,7 +479,7 @@ impl Broker {
 
     // Récupère les informations d'un client par son SID depuis le cache en mémoire.
     // C'est une lecture, donc elle est rapide grâce au `RwLock`.
-    pub async fn get_client_by_sid(&self, sid: &str) -> Option<(String, Vec<String>, f64)> {
+    pub async fn get_client_by_sid(&self, sid: &str) -> Option<SubscriptionEntry> {
         let subs = self.subscriptions.read().await;
         // `cloned()` pour retourner une copie des données et libérer le verrou rapidement.
         subs.get(sid).cloned()
